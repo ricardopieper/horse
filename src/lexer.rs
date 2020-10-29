@@ -220,6 +220,7 @@ impl Tokenizer {
                 self.eat_char('.');
                 self.eat_numbers();
                 self.eat_char('e');
+                self.eat_char('-');
                 self.eat_numbers();
                 self.cur_partial_token = PartialToken::LiteralFloat(self.clone_buf());
                 self.reset_eater_buffer();

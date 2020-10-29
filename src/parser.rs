@@ -9,6 +9,7 @@ pub enum Expr {
     Variable(String),
     BinaryOperation(Box<Expr>, Operator, Box<Expr>),
     Parenthesized(Box<Expr>),
+    UnaryExpression(Operator, Box<Expr>)
 }
 
 impl Expr {
@@ -43,6 +44,7 @@ fn precedence(o: Operator) -> u32 {
 fn clean_parens(expr: Expr) -> Expr {
     match expr {
         Expr::Parenthesized(e) => clean_parens(*e),
+        Expr::UnaryExpression(op, e) => Expr::UnaryExpression(op, Box::new(clean_parens(*e))),
         Expr::BinaryOperation(left, op, right) => {
             let left_clean = Box::new(clean_parens(*left));
             let right_clean = Box::new(clean_parens(*right));
@@ -114,6 +116,8 @@ struct ParseExpressionResult {
 
 //Parses a single expression
 fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
+
+    
     let mut token_queue = VecDeque::from(tokens);
     let mut operator_stack: Vec<Operator> = vec![];
     let mut operand_stack: Vec<Expr> = vec![];
@@ -223,7 +227,9 @@ fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
                     not_part_of_expr = true;
                     token_queue.push_front(tok);
                 }
-                Token::Operator(o) => operator_stack.push(o),
+                Token::Operator(o) => {
+                    operator_stack.push(o)
+                },
                 _ => {
                     not_part_of_expr = true;
                     token_queue.push_front(tok);
@@ -234,7 +240,30 @@ fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
             break;
         }
 
+        //-(5.0 / 9.0) * 32
+       
         if was_operand {
+            //base case: there is only an operator and an operand, like "-1"
+            if operand_stack.len() == 1 && operator_stack.len() == 1 {
+                let last_operand = operand_stack.pop().unwrap();
+                let op = operator_stack.pop().unwrap();
+                operand_stack.push(
+                    Expr::UnaryExpression(op, Box::new(last_operand)));
+                
+            }
+            //repeat case: 2 * -----2 or even 2 * -2, consume all the minus signals
+            else if operator_stack.len() > 1 && operand_stack.len() == 2 {
+                while operator_stack.len() > 1 {
+
+                    let last_operand = operand_stack.pop().unwrap();
+                    let op = operator_stack.pop().unwrap();
+
+                    operand_stack.push(
+                        Expr::UnaryExpression(op, Box::new(last_operand)));
+                }
+            }
+            //if it executes the previous if, we will have an operand, operator, and an unary exp operand 
+
             let has_sufficient_operands = operand_stack.len() >= 2;
             let has_pending_operators = !operator_stack.is_empty();
 
@@ -242,6 +271,7 @@ fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
                 let rhs_root = operand_stack.pop().unwrap();
                 let lhs_root = operand_stack.pop().unwrap();
                 let op = operator_stack.pop().unwrap();
+
 
                 let mut bin_op = Expr::BinaryOperation(
                     Box::new(lhs_root.clone()),
@@ -280,8 +310,18 @@ fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
                 }
                 operand_stack.push(bin_op);
             }
+        
         }
     }
+
+    //consume the remaining operators
+    if operand_stack.len() == 1 {
+        while operator_stack.len() > 0 {
+            let expr = operand_stack.pop().unwrap();
+            operand_stack.push(Expr::UnaryExpression(operator_stack.pop().unwrap(), Box::new(expr)));
+        }
+    }
+
 
     if !operator_stack.is_empty() {
         panic!(
@@ -845,4 +885,185 @@ mod tests {
         let expected = Expr::FunctionCall(String::from("func"), vec![Expr::IntegerValue(1)]);
         assert_eq!(expected, result);
     }
+
+    #[test]
+    fn minus_one() {
+        let tokens = tokenize("-1").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::UnaryExpression(Operator::Minus, Box::new(Expr::IntegerValue(1)));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn minus_expr() {
+        let tokens = tokenize("-(5.0 / 9.0)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::UnaryExpression(Operator::Minus, 
+            Box::new(Expr::BinaryOperation(
+                (5.0).into(),
+                Operator::Divide,
+                (9.0).into()
+            )));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn two_times_minus_one() {
+        let tokens = tokenize("2 * -1").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+                (2).into(),
+                Operator::Multiply,
+                Box::new(Expr::UnaryExpression(
+                    Operator::Minus,
+                    1.into()
+                ))
+            );
+        assert_eq!(expected, result);
+    }
+
+
+    #[test]
+    fn two_times_minus_repeated_one() {
+        let tokens = tokenize("2 * --1").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+                (2).into(),
+                Operator::Multiply,
+                Box::new(Expr::UnaryExpression(
+                    Operator::Minus,
+                    Box::new(Expr::UnaryExpression(
+                        Operator::Minus,
+                        1.into()
+                    ))))
+            );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn two_times_minus_plus_minus_one() {
+        let tokens = tokenize("2 * -+-1").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+                (2).into(),
+                Operator::Multiply,
+                Box::new(Expr::UnaryExpression(
+                    Operator::Minus,
+                    Box::new(Expr::UnaryExpression(
+                        Operator::Plus,
+                        Box::new(Expr::UnaryExpression(
+                            Operator::Minus,
+                            1.into()
+                        ))))))
+            );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn two_times_minus_plus_minus_one_parenthesized() {
+        let tokens = tokenize("2 * (-+-1)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+                (2).into(),
+                Operator::Multiply,
+                Box::new(Expr::UnaryExpression(
+                    Operator::Minus,
+                    Box::new(Expr::UnaryExpression(
+                        Operator::Plus,
+                        Box::new(Expr::UnaryExpression(
+                            Operator::Minus,
+                            1.into()
+                        ))))))
+            );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn two_times_minus_plus_minus_one_in_function_call() {
+        let tokens = tokenize("2 * func(-+-1)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+                (2).into(),
+                Operator::Multiply,
+                Box::new(Expr::FunctionCall(
+                    String::from("func"),
+                    vec![Expr::UnaryExpression(
+                        Operator::Minus,
+                        Box::new(Expr::UnaryExpression(
+                            Operator::Plus,
+                            Box::new(Expr::UnaryExpression(
+                                Operator::Minus,
+                                1.into()
+                            )))))]
+                ))
+            );
+        assert_eq!(expected, result);
+    }
+
+
+    #[test]
+    fn fahrenheit_1_expr() {
+        //-(5.0 / 9.0) * 32
+        let tokens = tokenize("-(5.0 / 9.0) * 32").unwrap();
+        let result = parse(tokens);
+
+        let dividend = Expr::BinaryOperation(
+            Box::new(Expr::UnaryExpression(
+                Operator::Minus, 
+                Box::new(Expr::BinaryOperation(
+                    (5.0).into(),
+                    Operator::Divide,
+                    (9.0).into()
+                )))),
+            Operator::Multiply,
+            (32).into()
+        );
+
+        assert_eq!(dividend, result);
+    }
+
+    #[test]
+    fn fahrenheit_expr() {
+        //(-(5.0 / 9.0) * 32)    /    (1 - (5.0 / 9.0))
+        let tokens = tokenize("(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))").unwrap();
+        let result = parse(tokens);
+
+        let dividend = Expr::BinaryOperation(
+            Box::new(Expr::UnaryExpression(
+                Operator::Minus, 
+                Box::new(Expr::BinaryOperation(
+                    (5.0).into(),
+                    Operator::Divide,
+                    (9.0).into()
+                )))),
+            Operator::Multiply,
+            (32).into()
+        );
+
+        let divisor = Expr::BinaryOperation(
+            1.into(),
+            Operator::Minus,
+            Box::new(Expr::BinaryOperation(
+                (5.0).into(),
+                Operator::Divide,
+                (9.0).into()
+            ))
+        );
+
+        let fahrenheit = Expr::BinaryOperation(
+            Box::new(dividend),
+            Operator::Divide,
+            Box::new(divisor)
+        );
+        
+        assert_eq!(fahrenheit, result);
+    }
 }
+
+
+//2 * - 1
+//2 = operand [2], operator = []
+//* = operand [2], operator = [*]
+//- = operand [2], operator = [*-]
+//1 = operand [2, 1], operator = [*-]
+//*(- 2 1)
