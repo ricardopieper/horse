@@ -37,6 +37,8 @@ pub enum Token {
     LiteralInteger(i128),
     Operator(Operator),
     Identifier(String),
+    Assign,
+    None,
     Comma
 }
 
@@ -53,7 +55,13 @@ impl PartialToken {
     fn to_token(self) -> Token {
         match self {
             Self::UndefinedOrWhitespace => panic!("Unexpected undefined token. This is a tokenizer bug."),
-            Self::Identifier(s) => Token::Identifier(s),
+            Self::Identifier(s) => {
+                if s == "None" {
+                    Token::None
+                } else {
+                    Token::Identifier(s)
+                }
+            },
             Self::Comma => Token::Comma,
             Self::LiteralFloat(s) => {
                 
@@ -79,6 +87,7 @@ impl PartialToken {
                     ">>" => Token::Operator(Operator::BitShiftRight),
                     "!" => Token::Operator(Operator::Not),
                     "==" => Token::Operator(Operator::Equals),
+                    "=" => Token::Assign,
                     "!=" => Token::Operator(Operator::NotEquals),
                     "(" => Token::Operator(Operator::OpenParen),
                     ")" => Token::Operator(Operator::CloseParen),
@@ -211,7 +220,7 @@ impl Tokenizer {
     }
 
     pub fn tokenize(mut self) -> Result<Vec<Token>, String> {
-        let operators = &["+", "-", "*", "/", "<<", ">>", "!=", "==", "!", "(", ")"];
+        let operators = &["+", "-", "*", "/", "<<", ">>", "!=", "==", "=", "!", "(", ")"];
         while self.can_go() {
             self.commit_current_token();
             if self.cur().is_numeric() {
@@ -470,6 +479,27 @@ mod tests {
             Token::LiteralInteger(1),
             Token::Operator(Operator::CloseParen)
             ]);
+        Ok(())
+    }
+
+
+    #[test]
+    fn assign_operator() -> Result<(), String> {
+        let result = tokenize("x = 1")?;
+        assert_eq!(result, [
+            Token::Identifier(String::from("x")),
+            Token::Assign,
+            Token::LiteralInteger(1)
+            ]);
+        Ok(())
+    }
+
+    #[test]
+    fn none() -> Result<(), String> {
+        let result = tokenize("None")?;
+        assert_eq!(result, [
+            Token::None
+        ]);
         Ok(())
     }
 }

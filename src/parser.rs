@@ -12,6 +12,11 @@ pub enum Expr {
     UnaryExpression(Operator, Box<Expr>)
 }
 
+/*pub enum Syntax {
+    StandaloneExpr(Expr),
+    Assign{ variable_name: String,  expression: Expr }
+}*/
+
 impl Expr {
     fn new_int(i: i128) -> Box<Self> {
         Box::new(Self::IntegerValue(i))
