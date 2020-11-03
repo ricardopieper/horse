@@ -50,7 +50,8 @@ Is the code any good?
 ---------------------
 
 Expect a lot of duplicated code while I'm figuring out the data model. There is some `unsafe` and `UnsafeCell`
-in some locations, which is not ideal, but Python doesn't care about data races :p
+in some locations, which is not ideal, but Python doesn't care about data races :p it doesn't affect the state
+of the interpreter though, just the user data in memory.
 
 When things are more figured out, the code in the interpreter will probably shrink significantly.
 
