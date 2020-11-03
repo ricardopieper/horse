@@ -15,7 +15,7 @@ The implemented types as of now are `NoneType`, `NotImplemented`, `int` and `flo
 The plan is to be able to run a reasonable Python program, therefore support for strings, 
 classes, etc may come in the future.
 
-The expected performance is to be even slower than Python. It will be enough if it works and computes 
+The expected performance is to be `snail-like`, even slower than Python. It will be enough if it works and computes 
 stuff correctly.
 
 Architecture
