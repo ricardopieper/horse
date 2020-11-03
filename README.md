@@ -1,7 +1,7 @@
 slowpython
 ==========
 
-This is a toy implementation of Python.
+This is a toy implementation of Python in Rust.
 
 For now, the only Python-y thing it has is the runtime system, where I'm trying to implement something
 similar to the Python data model.
