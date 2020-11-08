@@ -415,11 +415,14 @@ impl Interpreter {
                     name: _,
                     bounded_functions,
                     unbounded_functions: _,
-                    supertype: _
+                    supertype
                 } => {
                     match bounded_functions.get(method_name) {
                         Some(addr) => Some(*addr),
-                        None => None
+                        None => match supertype {
+                            Some(supertype_addr) => self.get_type_method_addr_byname(*supertype_addr, method_name),
+                            None => None
+                        }
                     }
                 },
                 _ => {
@@ -430,19 +433,7 @@ impl Interpreter {
         })
     }
 
-    pub fn call_method(&self, addr: MemoryAddress, method_name: &str, params: Vec<MemoryAddress>) -> Option<MemoryAddress> {
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
-        self.get_type_method_addr_byname(pyobj.type_addr, method_name).map(move |method_addr| {
-            self.callable_call(method_addr, CallParams {
-                bound_pyobj: Some(addr),
-                func_address: method_addr,
-                func_name: Some(method_name.to_string()),
-                params
-            })
-        })
-    }
-
-
+ 
     pub fn get_type_name(&self, addr: MemoryAddress) -> &str {
         match self.get_pyobj_byaddr(addr) {
             Some(obj) => match &obj.structure {
@@ -523,17 +514,6 @@ impl Interpreter {
         );
     }
 
-    #[cfg(test)]
-    pub fn allocate_type_byname_raw_struct(
-        &self,
-        module: &str,
-        name: &str,
-        raw_data: Box<dyn Any>,
-    ) -> MemoryAddress {
-        let (_, type_addr) = self.get_pyobj_type_byname(module, name).unwrap();
-        self.allocate_type_byaddr_raw(type_addr, raw_data)
-    }
-
     pub fn create_callable_pyobj(&self, callable: PyCallable, name: Option<String>) -> MemoryAddress {
         let raw_callable = self.allocate_and_write(Box::new(callable));
 
@@ -587,43 +567,16 @@ impl Interpreter {
         }
     }
 
-    #[cfg(test)]
-    pub fn bounded_function_call(
-        &self,
-        bound_obj_addr: MemoryAddress,
-        method_name: &str,
-        params: Vec<MemoryAddress>,
-    ) -> MemoryAddress {
-        let pyobj: &PyObject = self.get_pyobj_byaddr(bound_obj_addr).unwrap();
-        let type_addr = pyobj.type_addr;
-        let type_pyobj = self.get_pyobj_byaddr(type_addr).unwrap();
-
-        //type_pyobj must be a type
-        if let PyObjectStructure::Type {
-            name: _,
-            bounded_functions,
-            unbounded_functions: _, supertype: _
-        } = &type_pyobj.structure
-        {
-            let memory_addr = bounded_functions.get(method_name);
-            if let Some(method_addr) = memory_addr {
-                let call_params = CallParams {
-                    bound_pyobj: Some(bound_obj_addr),
-                    func_address: *method_addr,
-                    func_name: Some(method_name.to_string()),
-                    params: params,
-                };
-
-                return self.callable_call(*method_addr, call_params);
-            } else {
-                panic!("Method not found: {}", method_name);
-            }
-        } else {
-            panic!(
-                "FATAL ERROR: pyobj addr {} was supposed to be a type, but it's something else: {:?}",
-                type_addr, &type_pyobj
-            );
-        }
+    pub fn call_method(&self, addr: MemoryAddress, method_name: &str, params: Vec<MemoryAddress>) -> Option<MemoryAddress> {
+        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+        self.get_type_method_addr_byname(pyobj.type_addr, method_name).map(move |method_addr| {
+            self.callable_call(method_addr, CallParams {
+                bound_pyobj: Some(addr),
+                func_address: method_addr,
+                func_name: Some(method_name.to_string()),
+                params
+            })
+        })
     }
 
     pub fn bounded_function_call_byaddr(
@@ -717,11 +670,6 @@ impl Interpreter {
         })
     }
 
-    #[cfg(test)]
-    pub fn stack_size(&self) -> usize {
-        self.stack.borrow().last().unwrap().stack.len()
-    }
-
     pub fn pop_stack(&self) -> MemoryAddress {
         match self.stack.borrow_mut().last_mut().unwrap().stack.pop() {
             Some(addr) => addr,
@@ -759,13 +707,6 @@ impl Interpreter {
         let mut current_stack = self.stack.borrow_mut();
         let current_frame = current_stack.last_mut().unwrap();
         current_frame.values.get(name).map(|a| *a)
-    }
-
-    #[cfg(test)]
-    pub fn unbind_local(&self, name: &str) -> MemoryAddress {
-        let mut current_stack = self.stack.borrow_mut();
-        let current_frame = current_stack.last_mut().unwrap();
-        current_frame.values.remove(name).unwrap()
     }
 
     pub fn allocate_and_write<'a>(&'a self, data: Box<dyn Any>) -> MemoryAddress {
@@ -827,7 +768,21 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__add__", vec![number2]);
+        let result = interpreter.call_method(number1, "__add__", vec![number2]).unwrap();
+        let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
+
+        assert_eq!(result_value, 4);
+    }
+
+    #[test]
+    fn call_bool_add_int() {
+        let interpreter = Interpreter::new();
+        register_builtins(&interpreter);
+        let number1 = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
+        let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
+
+        //number1.__add__(number2)
+        let result = interpreter.call_method(number1, "__add__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
 
         assert_eq!(result_value, 4);
@@ -841,7 +796,7 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__add__", vec![number2]);
+        let result = interpreter.call_method(number1, "__add__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
 
         assert_eq!(result_value, 4.5 as f64);
@@ -855,7 +810,7 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__add__", vec![number2]);
+        let result = interpreter.call_method(number1, "__add__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
 
         assert_eq!(result_value, 4.5 as f64);
@@ -870,7 +825,7 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(1.1 as f64));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__add__", vec![number2]);
+        let result = interpreter.call_method(number1, "__add__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
 
         assert_eq!(result_value, 4.5 as f64);
@@ -884,7 +839,7 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.0 as f64));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__mul__", vec![number2]);
+        let result = interpreter.call_method(number1, "__mul__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
 
         assert_eq!(result_value, 6.0 as f64);
@@ -898,7 +853,7 @@ mod tests {
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
 
         //number1.__add__(number2)
-        let result = interpreter.bounded_function_call(number1, "__mul__", vec![number2]);
+        let result = interpreter.call_method(number1, "__mul__", vec![number2]).unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
 
         assert_eq!(result_value, 6 as i128);

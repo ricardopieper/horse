@@ -89,7 +89,10 @@ pub fn compile(ast: Vec<AST>) -> Vec<Instruction> {
                 all_instructions.append(&mut compile_expr(expression));
                 all_instructions.push(Instruction::StoreName(variable_name));
             }
-            AST::StandaloneExpr(expr) => return compile_expr(expr),
+            AST::StandaloneExpr(expr) => {
+              all_instructions.append(&mut compile_expr(expr)); 
+            },
+            _ => panic!("Instruction not covered: {:?}", ast_item)
         }
     }
 

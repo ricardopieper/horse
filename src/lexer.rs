@@ -41,11 +41,17 @@ pub enum Token {
     LiteralString(String),
     Operator(Operator),
     Identifier(String),
+    NewLine,
     Assign,
     True,
     False,
     None,
     Comma,
+    Colon,
+    IfKeyword,
+    ElifKeyword,
+    ElseKeyword,
+    Indentation
 }
 
 #[derive(Debug)]
@@ -55,7 +61,9 @@ enum PartialToken {
     Operator(String),
     Identifier(String),
     String(String),
+    NewLine,
     Comma,
+    Colon,
 }
 
 impl PartialToken {
@@ -71,9 +79,14 @@ impl PartialToken {
                 "False" => Token::False,
                 "and" => Token::Operator(Operator::And),
                 "or" => Token::Operator(Operator::Or),
+                "if" => Token::IfKeyword,
+                "elif" => Token::ElifKeyword,
+                "else" => Token::ElseKeyword,
                 _ => Token::Identifier(s),
             },
             Self::Comma => Token::Comma,
+            Self::Colon => Token::Colon,
+            Self::NewLine => Token::NewLine,
             Self::LiteralFloat(s) => {
                 if s.contains('.') || s.contains('e') {
                     match s.parse::<f64>() {
@@ -144,8 +157,8 @@ impl Tokenizer {
         self.cur_offset(0)
     }
 
-    fn cur_offset(&self, offset: usize) -> char {
-        self.chars[self.index + offset]
+    fn cur_offset(&self, offset: isize) -> char {
+        self.chars[(self.index as isize + offset) as usize]
     }
 
     fn can_go(&self) -> bool {
@@ -256,7 +269,7 @@ impl Tokenizer {
         let mut matched_chars = 0;
         let chars: Vec<char> = query.chars().collect();
         for i in 0..query.len() {
-            if self.cur_offset(i) != chars[i] {
+            if self.cur_offset(i as isize) != chars[i] {
                 return (false, 0);
             }
             matched_chars = matched_chars + 1
@@ -295,7 +308,33 @@ impl Tokenizer {
                 self.cur_partial_token = PartialToken::Comma;
                 self.commit_current_token();
                 self.next();
-            } else if self.cur().is_whitespace() {
+            }
+            else if self.cur() == ':' {
+                self.cur_partial_token = PartialToken::Colon;
+                self.commit_current_token();
+                self.next();
+            }
+            else if self.cur() == '\n' {
+                self.cur_partial_token = PartialToken::NewLine;
+                self.commit_current_token();
+                self.next();
+            }
+            else if self.index > 0 && self.cur_offset(-1) == '\n' && self.cur() == ' ' {
+                let mut current_spaces = 0; 
+                while self.cur() == ' ' {
+                    current_spaces = current_spaces + 1;
+                    self.next();
+                }
+                if current_spaces % 4 != 0 {
+                    panic!("Indentation must be a multiple of 4");
+                }
+                let indents = current_spaces / 4;
+                for _i in 0..indents {
+                    self.final_result.push(Token::Indentation);
+                }
+
+            }
+            else if self.cur().is_whitespace() {
                 //if it's whitespace and there's a pending token, add it
                 self.next();
             } else if let Some(s) = self.match_first_and_advance(operators) {
@@ -322,6 +361,7 @@ impl Tokenizer {
 }
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>, String> {
+    println!("Source to tokenize: {}", source);
     Tokenizer::new(source).tokenize()
 }
 
@@ -638,6 +678,31 @@ mod tests {
             result,
             [
                 Token::LiteralString(String::from("a'b'c"))
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_if() -> Result<(), String> {
+        let result = tokenize("if x == 0:
+    x = x + 1")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::IfKeyword,
+                Token::Identifier(String::from("x")),
+                Token::Operator(Operator::Equals),
+                Token::LiteralInteger(0),
+                Token::Colon,
+                Token::NewLine,
+                Token::Indentation,
+                Token::Identifier(String::from("x")),
+                Token::Assign,
+                Token::Identifier(String::from("x")),
+                Token::Operator(Operator::Plus),
+                Token::LiteralInteger(1)
             ]
         );
         Ok(())

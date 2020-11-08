@@ -1,6 +1,4 @@
 use crate::lexer::*;
-use std::collections::VecDeque;
-use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
@@ -16,11 +14,22 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ASTIfStatement {
+    expression: Expr,
+    statements: Vec<AST>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AST {
     StandaloneExpr(Expr),
     Assign {
         variable_name: String,
         expression: Expr,
+    },
+    IfStatement {
+        true_branch: ASTIfStatement,
+        elifs: Vec<ASTIfStatement>,
+        final_else: Option<Vec<AST>>,
     },
 }
 
@@ -69,13 +78,13 @@ fn clean_parens(expr: Expr) -> Expr {
 pub struct Parser {
     parsing_state: Vec<ParsingState>,
     tokens: Vec<Token>,
-    final_result: Vec<AST>,
 }
 
 struct ParsingState {
     operator_stack: Vec<Operator>,
     operand_stack: Vec<Expr>,
     index: usize,
+    current_indent: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -90,9 +99,9 @@ impl Parser {
                 index: 0,
                 operator_stack: vec![],
                 operand_stack: vec![],
+                current_indent: 0,
             }],
             tokens: tokens,
-            final_result: vec![],
         }
     }
 
@@ -101,6 +110,7 @@ impl Parser {
             index: self.parsing_state.last().unwrap().index,
             operator_stack: vec![],
             operand_stack: vec![],
+            current_indent: self.parsing_state.last().unwrap().current_indent,
         })
     }
 
@@ -115,6 +125,20 @@ impl Parser {
     fn advance(&mut self, offset: isize) {
         let index = self.parsing_state.last().unwrap().index as isize;
         self.parsing_state.last_mut().unwrap().index = (index + offset) as usize;
+    }
+
+    fn increment_expected_indent(&mut self) {
+        let indent = self.parsing_state.last().unwrap().current_indent as isize;
+        self.parsing_state.last_mut().unwrap().current_indent = (indent + 1) as usize;
+    }
+
+    fn decrement_expected_indent(&mut self) {
+        let indent = self.parsing_state.last().unwrap().current_indent as isize;
+        self.parsing_state.last_mut().unwrap().current_indent = (indent - 1) as usize;
+    }
+
+    fn get_expected_indent(&mut self) -> usize {
+        return self.parsing_state.last_mut().unwrap().current_indent;
     }
 
     fn set_cur(&mut self, index: usize) {
@@ -134,8 +158,20 @@ impl Parser {
         self.parsing_state.last().unwrap().index == self.tokens.len() - 1
     }
 
-    fn can_go(&self) -> bool {
+    fn is_not_end(&self) -> bool {
         self.parsing_state.last().unwrap().index < self.tokens.len()
+    }
+
+    fn can_go(&self) -> bool {
+        self.is_not_end() && !self.cur_is_newline()
+    }
+
+    fn cur_is_newline(&self) -> bool {
+        if let Token::NewLine = self.cur() {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     fn push_operand(&mut self, token: Expr) {
@@ -170,34 +206,227 @@ impl Parser {
         return &mut self.parsing_state.last_mut().unwrap().operator_stack;
     }
 
-    pub fn parse_ast(&mut self) -> Result<Vec<AST>, ParsingError> {
-        let mut results = vec![];
-        self.new_stack();
-        let mut failed_assign = false;
+    pub fn parse_assign(&mut self) -> Option<AST> {
         if let Token::Identifier(id) = self.cur().clone() {
             self.next();
             if !self.can_go() {
-                failed_assign = true;
+                None
             } else {
                 if let Token::Assign = self.cur() {
                     self.next();
-                    let expr = self.parse_expr()?;
-                    results.push(AST::Assign {
+                    let expr = self.parse_expr().expect("Expected expression after assign");
+                    Some(AST::Assign {
                         variable_name: id.to_string(),
                         expression: expr.resulting_expr,
-                    });
+                    })
                 } else {
-                    failed_assign = true;
+                    None
                 }
             }
         } else {
-            failed_assign = true;
+            None
         }
+    }
 
-        if failed_assign {
-            self.pop_stack();
-            let expr = self.parse_expr()?;
-            results.push(AST::StandaloneExpr(expr.resulting_expr));
+    pub fn parse_if_statement(&mut self) -> Option<AST> {
+        if let Token::IfKeyword = self.cur().clone() {
+            self.next();
+            if !self.can_go() {
+                None
+            } else {
+                let expr = self.parse_expr().expect("Expected expr").resulting_expr;
+                println!("if statement: {:?}", expr);
+                if let Token::Colon = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected colon after if expr");
+                }
+
+                if let Token::NewLine = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected newline after colon");
+                }
+
+                self.increment_expected_indent();
+                let ast = self.parse_ast().unwrap();
+                let mut if_statement = AST::IfStatement {
+                    true_branch: ASTIfStatement {
+                        expression: expr,
+                        statements: ast,
+                    },
+                    elifs: vec![],
+                    final_else: None,
+                };
+                self.decrement_expected_indent();
+
+                let cur_identation = self.get_expected_indent();
+                //lets try getting the else statement:
+                self.new_stack();
+                let identation_else = self.skip_whitespace_newline();
+                
+                if self.can_go() && identation_else == cur_identation {
+                    if let Token::ElseKeyword = self.cur()  {
+                        self.next();
+                        if let Token::Colon = self.cur() {
+                            self.next();
+                        } else {
+                            panic!("Expected colon after if expr");
+                        }
+        
+                        if let Token::NewLine = self.cur() {
+                            self.next();
+                        } else {
+                            panic!("Expected newline after colon");
+                        }
+
+                        self.increment_expected_indent();
+                        let ast = self.parse_ast().unwrap();
+                        if_statement = match if_statement {
+                            AST::IfStatement{true_branch, elifs, final_else: _} => {
+                                AST::IfStatement{true_branch, elifs, final_else: Some(ast)}
+                            },
+                            _ => {
+                                panic!("Unrecognized ast on if else parsing")
+                            }
+                        };
+                        self.decrement_expected_indent();
+
+                    } else {
+                        self.pop_stack();
+                    }
+                } else {
+                    self.pop_stack();
+                }
+                return Some(if_statement);
+            }
+        } else {
+            None
+        }
+    }
+
+    //returns the identation level until the first non-whitespace token
+    //final state of this function is right at newline, before the identations
+    fn skip_whitespace_newline(&mut self) -> usize {
+        let mut identation_level = 0;
+        while self.is_not_end() {
+            match self.cur() {
+                Token::NewLine => {
+                    identation_level = 0;
+                }
+                Token::Indentation => identation_level = identation_level + 1,
+                _ => {
+                    break;
+                }
+            }
+            self.next();
+        }
+        return identation_level;
+    }
+
+    pub fn parse_ast(&mut self) -> Result<Vec<AST>, ParsingError> {
+        let mut results = vec![];
+
+        loop {
+            self.new_stack();
+
+            let last_identation = self.skip_whitespace_newline();
+
+            if last_identation == self.get_expected_indent() {
+                let popped = self.pop_stack();
+                //correct indentation found: commit
+                self.set_cur(popped.index);
+            } else {
+                println!("Ended identation, cur = {:?}", self.cur());
+                self.pop_stack();
+                return Ok(results);
+            }
+
+            if !self.is_not_end() {
+                return Ok(results);
+            }
+
+            let mut parsed_successfully = false;
+
+            if !parsed_successfully {
+                self.new_stack();
+                if let Some(assign_ast) = self.parse_assign() {
+                    println!("Parsed Assign: {:?}", assign_ast);
+                    results.push(assign_ast);
+                    parsed_successfully = true;
+                    let popped = self.pop_stack();
+                    //correct indentation found: commit
+                    self.set_cur(popped.index);
+                    assert!(
+                        !self.is_not_end() || self.cur_is_newline(),
+                        "Newline or EOF expected after assign"
+                    );
+                } else {
+                    self.pop_stack();
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let expr = self.parse_if_statement();
+                match expr {
+                    Some(ast_if) => {
+                        println!("Parsed IF: {:?}", ast_if);
+                        results.push(ast_if);
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after if block"
+                        );
+                    }
+                    None => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let expr = self.parse_expr()?;
+                println!("Parsed Standalone: {:?}", expr.resulting_expr);
+                results.push(AST::StandaloneExpr(expr.resulting_expr));
+                let popped = self.pop_stack();
+                //correct indentation found: commit
+                self.set_cur(popped.index);
+                parsed_successfully = true;
+                assert!(
+                    !self.is_not_end() || self.cur_is_newline(),
+                    "Newline or EOF expected after standalone expr"
+                );
+            }
+
+            if !parsed_successfully {
+                panic!("Could not parse code")
+            }
+
+            if self.is_not_end() {
+                println!(
+                    "parse_ast reached end with cur = {:?}, parsed = {:?}",
+                    self.cur(),
+                    results
+                );
+
+                if !self.cur_is_newline() {
+                    panic!(
+                        "is not end but is also not newline, cur = {:?}, parsed = {:?}",
+                        self.cur(),
+                        results
+                    )
+                } else {
+                    continue;
+                }
+            } else {
+                break;
+            }
         }
 
         return Ok(results);
@@ -214,7 +443,7 @@ impl Parser {
             //and parse the sub-expression recursively
             {
                 let tok: Token = self.cur().clone();
-                //println!("Called parseExpr, current: {:?}", tok);
+                // println!("Called parseExpr, current: {:?}", tok);
                 match tok {
                     Token::Operator(Operator::OpenParen) => {
                         self.new_stack(); //new parsing stack/state
@@ -514,12 +743,6 @@ pub struct ParseExpressionResult {
     resulting_expr: Expr,
 }
 
-//Parses a single expression
-pub fn parse(tokens: Vec<Token>) -> Expr {
-    let mut parser = Parser::new(tokens);
-    return parser.parse_expr().unwrap().resulting_expr;
-}
-
 pub fn parse_ast(tokens: Vec<Token>) -> Vec<AST> {
     let mut parser = Parser::new(tokens);
     return parser.parse_ast().unwrap();
@@ -528,6 +751,288 @@ pub fn parse_ast(tokens: Vec<Token>) -> Vec<AST> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    //Parses a single expression
+    fn parse(tokens: Vec<Token>) -> Expr {
+        let mut parser = Parser::new(tokens);
+        return parser.parse_expr().unwrap().resulting_expr;
+    }
+
+    #[test]
+    fn multiline_code() {
+        let tokens = tokenize(
+            "x = 'abc' + 'cde'
+y = x + str(True)",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::Assign {
+                variable_name: String::from("x"),
+                expression: Expr::BinaryOperation(
+                    Box::new(Expr::StringValue(String::from("abc"))),
+                    Operator::Plus,
+                    Box::new(Expr::StringValue(String::from("cde"))),
+                ),
+            },
+            AST::Assign {
+                variable_name: String::from("y"),
+                expression: Expr::BinaryOperation(
+                    Box::new(Expr::Variable(String::from("x"))),
+                    Operator::Plus,
+                    Box::new(Expr::FunctionCall(
+                        String::from("str"),
+                        vec![Expr::BooleanValue(true)],
+                    )),
+                ),
+            },
+        ];
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn if_statement_with_print_after_and_newlines_before_and_after() {
+        let tokens = tokenize(
+            "
+if x == 0:
+    x = x + 1
+else:
+    x = 999
+    if x == 1:
+        print(2)
+print(x)
+",
+        )
+        .unwrap();
+
+        println!("Tokens: {:?}", tokens);
+
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::IfStatement {
+                true_branch: ASTIfStatement {
+                    expression: Expr::BinaryOperation(
+                        Box::new(Expr::Variable(String::from("x"))),
+                        Operator::Equals,
+                        Box::new(Expr::IntegerValue(0)),
+                    ),
+                    statements: vec![
+                        AST::Assign {
+                            variable_name: String::from("x"),
+                            expression: Expr::BinaryOperation(
+                                Box::new(Expr::Variable(String::from("x"))),
+                                Operator::Plus,
+                                Box::new(Expr::IntegerValue(1)),
+                            ),
+                        }
+                    ],
+                },
+                elifs: vec![],
+                final_else: Some(vec![
+                    AST::Assign{ variable_name: String::from("x"), expression: Expr::IntegerValue(999)},
+                    AST::IfStatement {
+                        true_branch: ASTIfStatement {
+                            expression: Expr::BinaryOperation(
+                                Box::new(Expr::Variable(String::from("x"))),
+                                Operator::Equals,
+                                Box::new(Expr::IntegerValue(1)),
+                            ),
+                            statements: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                                String::from("print"),
+                                vec![Expr::IntegerValue(2)],
+                            ))],
+                        },
+                        elifs: vec![],
+                        final_else: None,
+                    },
+                ]),
+            },
+            AST::StandaloneExpr(Expr::FunctionCall(
+                String::from("print"),
+                vec![Expr::Variable(String::from("x"))],
+            )),
+        ];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn bunch_of_newlines() {
+        let source_wacky = "
+
+<tab><tab><tab><tab><tab><tab><tab>        
+
+if x == 0:
+<tab><tab><tab><tab><tab><tab><tab>
+<tab>x = x + 1<tab><tab><tab><tab><tab><tab>
+<tab>
+
+<tab>if x == 1:
+<tab><tab><tab><tab><tab>
+<tab><tab>print(2)
+
+<tab>
+print(x)
+
+
+";
+
+        let source_replaced = source_wacky.replace("<tab>", "    ");
+
+        let tokens = tokenize(source_replaced.as_str()).unwrap();
+
+        println!("Tokens: {:?}", tokens);
+
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::IfStatement {
+                true_branch: ASTIfStatement {
+                    expression: Expr::BinaryOperation(
+                        Box::new(Expr::Variable(String::from("x"))),
+                        Operator::Equals,
+                        Box::new(Expr::IntegerValue(0)),
+                    ),
+                    statements: vec![
+                        AST::Assign {
+                            variable_name: String::from("x"),
+                            expression: Expr::BinaryOperation(
+                                Box::new(Expr::Variable(String::from("x"))),
+                                Operator::Plus,
+                                Box::new(Expr::IntegerValue(1)),
+                            ),
+                        },
+                        AST::IfStatement {
+                            true_branch: ASTIfStatement {
+                                expression: Expr::BinaryOperation(
+                                    Box::new(Expr::Variable(String::from("x"))),
+                                    Operator::Equals,
+                                    Box::new(Expr::IntegerValue(1)),
+                                ),
+                                statements: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                                    String::from("print"),
+                                    vec![Expr::IntegerValue(2)],
+                                ))],
+                            },
+                            elifs: vec![],
+                            final_else: None,
+                        },
+                    ],
+                },
+                elifs: vec![],
+                final_else: None,
+            },
+            AST::StandaloneExpr(Expr::FunctionCall(
+                String::from("print"),
+                vec![Expr::Variable(String::from("x"))],
+            )),
+        ];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn if_statement() {
+        let tokens = tokenize(
+            "if x == 0:
+    x = x + 1",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::IfStatement {
+            true_branch: ASTIfStatement {
+                expression: Expr::BinaryOperation(
+                    Box::new(Expr::Variable(String::from("x"))),
+                    Operator::Equals,
+                    Box::new(Expr::IntegerValue(0)),
+                ),
+                statements: vec![AST::Assign {
+                    variable_name: String::from("x"),
+                    expression: Expr::BinaryOperation(
+                        Box::new(Expr::Variable(String::from("x"))),
+                        Operator::Plus,
+                        Box::new(Expr::IntegerValue(1)),
+                    ),
+                }],
+            },
+            elifs: vec![],
+            final_else: None,
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn if_statement_with_print_after() {
+        let tokens = tokenize(
+            "if x == 0:
+    x = x + 1
+print(x)",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::IfStatement {
+                true_branch: ASTIfStatement {
+                    expression: Expr::BinaryOperation(
+                        Box::new(Expr::Variable(String::from("x"))),
+                        Operator::Equals,
+                        Box::new(Expr::IntegerValue(0)),
+                    ),
+                    statements: vec![AST::Assign {
+                        variable_name: String::from("x"),
+                        expression: Expr::BinaryOperation(
+                            Box::new(Expr::Variable(String::from("x"))),
+                            Operator::Plus,
+                            Box::new(Expr::IntegerValue(1)),
+                        ),
+                    }],
+                },
+                elifs: vec![],
+                final_else: None,
+            },
+            AST::StandaloneExpr(Expr::FunctionCall(
+                String::from("print"),
+                vec![Expr::Variable(String::from("x"))],
+            )),
+        ];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn multiline_code2() {
+        let tokens = tokenize(
+            "x = 'abc' + 'cde'
+y = x + str(True)
+print(y)",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::Assign {
+                variable_name: String::from("x"),
+                expression: Expr::BinaryOperation(
+                    Box::new(Expr::StringValue(String::from("abc"))),
+                    Operator::Plus,
+                    Box::new(Expr::StringValue(String::from("cde"))),
+                ),
+            },
+            AST::Assign {
+                variable_name: String::from("y"),
+                expression: Expr::BinaryOperation(
+                    Box::new(Expr::Variable(String::from("x"))),
+                    Operator::Plus,
+                    Box::new(Expr::FunctionCall(
+                        String::from("str"),
+                        vec![Expr::BooleanValue(true)],
+                    )),
+                ),
+            },
+            AST::StandaloneExpr(Expr::FunctionCall(
+                String::from("print"),
+                vec![Expr::Variable(String::from("y"))],
+            )),
+        ];
+
+        assert_eq!(expected, result);
+    }
 
     #[test]
     fn parse_literal_alone() {
@@ -1439,7 +1944,7 @@ mod tests {
             expression: Expr::BinaryOperation(
                 Box::new(Expr::StringValue(String::from("abc"))),
                 Operator::Plus,
-                Box::new(Expr::StringValue(String::from("cde")))
+                Box::new(Expr::StringValue(String::from("cde"))),
             ),
         }];
 
