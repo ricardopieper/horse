@@ -1,21 +1,28 @@
 use crate::lexer::*;
 use std::collections::VecDeque;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     IntegerValue(i128),
     FloatValue(Float),
+    StringValue(String),
+    BooleanValue(bool),
     FunctionCall(String, Vec<Expr>),
     Variable(String),
     BinaryOperation(Box<Expr>, Operator, Box<Expr>),
     Parenthesized(Box<Expr>),
-    UnaryExpression(Operator, Box<Expr>)
+    UnaryExpression(Operator, Box<Expr>),
 }
 
-/*pub enum Syntax {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AST {
     StandaloneExpr(Expr),
-    Assign{ variable_name: String,  expression: Expr }
-}*/
+    Assign {
+        variable_name: String,
+        expression: Expr,
+    },
+}
 
 impl Expr {
     fn new_int(i: i128) -> Box<Self> {
@@ -59,300 +66,487 @@ fn clean_parens(expr: Expr) -> Expr {
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Expr {
-    let mut list_expr_result = parse_comma_sep_list_expr(tokens);
-    if list_expr_result.remaining_tokens.len() != 0 {
-        panic!(
-            "There are remaining tokens! ${:?}",
-            list_expr_result.remaining_tokens
-        );
-    }
-    if list_expr_result.resulting_expr_list.len() == 0 {
-        panic!(
-            "Nothing was parsed from expr ${:?}",
-            list_expr_result.remaining_tokens
-        );
+pub struct Parser {
+    parsing_state: Vec<ParsingState>,
+    tokens: Vec<Token>,
+    final_result: Vec<AST>,
+}
+
+struct ParsingState {
+    operator_stack: Vec<Operator>,
+    operand_stack: Vec<Expr>,
+    index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParsingError {
+    ExprError(String),
+}
+
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Parser {
+        Parser {
+            parsing_state: vec![ParsingState {
+                index: 0,
+                operator_stack: vec![],
+                operand_stack: vec![],
+            }],
+            tokens: tokens,
+            final_result: vec![],
+        }
     }
 
-    return list_expr_result.resulting_expr_list.swap_remove(0);
+    fn new_stack(&mut self) {
+        self.parsing_state.push(ParsingState {
+            index: self.parsing_state.last().unwrap().index,
+            operator_stack: vec![],
+            operand_stack: vec![],
+        })
+    }
+
+    fn pop_stack(&mut self) -> ParsingState {
+        self.parsing_state.pop().unwrap()
+    }
+
+    fn next(&mut self) {
+        self.advance(1)
+    }
+
+    fn advance(&mut self, offset: isize) {
+        let index = self.parsing_state.last().unwrap().index as isize;
+        self.parsing_state.last_mut().unwrap().index = (index + offset) as usize;
+    }
+
+    fn set_cur(&mut self, index: usize) {
+        self.parsing_state.last_mut().unwrap().index = index;
+    }
+
+    fn cur(&self) -> &Token {
+        self.cur_offset(0)
+    }
+
+    fn cur_offset(&self, offset: isize) -> &Token {
+        let index = self.parsing_state.last().unwrap().index as isize + offset;
+        self.tokens.get(index as usize).unwrap()
+    }
+
+    fn is_last(&self) -> bool {
+        self.parsing_state.last().unwrap().index == self.tokens.len() - 1
+    }
+
+    fn can_go(&self) -> bool {
+        self.parsing_state.last().unwrap().index < self.tokens.len()
+    }
+
+    fn push_operand(&mut self, token: Expr) {
+        self.parsing_state
+            .last_mut()
+            .unwrap()
+            .operand_stack
+            .push(token);
+    }
+
+    fn push_operator(&mut self, operator: Operator) {
+        self.parsing_state
+            .last_mut()
+            .unwrap()
+            .operator_stack
+            .push(operator);
+    }
+
+    fn operand_stack(&self) -> &Vec<Expr> {
+        return &self.parsing_state.last().unwrap().operand_stack;
+    }
+
+    fn operator_stack(&self) -> &Vec<Operator> {
+        return &self.parsing_state.last().unwrap().operator_stack;
+    }
+
+    fn operand_stack_mut(&mut self) -> &mut Vec<Expr> {
+        return &mut self.parsing_state.last_mut().unwrap().operand_stack;
+    }
+
+    fn operator_stack_mut(&mut self) -> &mut Vec<Operator> {
+        return &mut self.parsing_state.last_mut().unwrap().operator_stack;
+    }
+
+    pub fn parse_ast(&mut self) -> Result<Vec<AST>, ParsingError> {
+        let mut results = vec![];
+        self.new_stack();
+        let mut failed_assign = false;
+        if let Token::Identifier(id) = self.cur().clone() {
+            self.next();
+            if !self.can_go() {
+                failed_assign = true;
+            } else {
+                if let Token::Assign = self.cur() {
+                    self.next();
+                    let expr = self.parse_expr()?;
+                    results.push(AST::Assign {
+                        variable_name: id.to_string(),
+                        expression: expr.resulting_expr,
+                    });
+                } else {
+                    failed_assign = true;
+                }
+            }
+        } else {
+            failed_assign = true;
+        }
+
+        if failed_assign {
+            self.pop_stack();
+            let expr = self.parse_expr()?;
+            results.push(AST::StandaloneExpr(expr.resulting_expr));
+        }
+
+        return Ok(results);
+    }
+
+    pub fn parse_expr(&mut self) -> Result<ParseExpressionResult, ParsingError> {
+        loop {
+            if !self.can_go() {
+                break;
+            }
+            let mut was_operand = false;
+            let mut not_part_of_expr = false;
+            //if there is an open paren, we collect all the tokens for this open paren
+            //and parse the sub-expression recursively
+            {
+                let tok: Token = self.cur().clone();
+                //println!("Called parseExpr, current: {:?}", tok);
+                match tok {
+                    Token::Operator(Operator::OpenParen) => {
+                        self.new_stack(); //new parsing stack/state
+                        self.next(); //move to the first character, out of the OpenParen
+
+                        match self.parse_expr() {
+                            //try parse stuff
+                            Ok(expr_result) => {
+                                //worked
+                                //commit the result
+                                let resulting_expr = expr_result.resulting_expr;
+                                let parenthesized = Expr::Parenthesized(Box::new(resulting_expr));
+
+                                let popped = self.pop_stack();
+                                self.push_operand(parenthesized);
+                                self.set_cur(popped.index);
+
+                                was_operand = true;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed parsing exprssion: {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Token::Identifier(identifier_str) => {
+                        if self.is_last() {
+                            self.push_operand(Expr::Variable(identifier_str.to_string()));
+                        } else {
+                            //if we have an identifier now,
+                            //then peek the next token to see if is a open paren.
+                            //if it is a open paren, then we are parsing a function.
+                            //Otherwise, consider that this is simply a variable
+                            self.next();
+                            let cur_token = self.cur();
+
+                            if let Token::Operator(Operator::OpenParen) = cur_token {
+                                //when we parse a funcion, we need to parse its arguments as well.
+                                //however, the list of arguments is a list of expressions, and those expressions might be
+                                //function calls as well.
+                                //like fcall(fcall(fcall(1, fcall(2)), fcall2(3, fcall())))....)
+                                //Unlike parenthesized expressions, in this case I cannot just fetch everything between
+                                //the parens because there are commas separating the arguments. I can't also fetch all
+                                //the tokens until I find a comma, because i would have a list of tokens containig
+                                //[fcall(fcall(fcall(1,] as my list of tokens to parse.
+                                //I will need to parse lists of expressions for other stuff as well, like array items and tuple items.
+                                //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
+                                //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
+                                //like it's part of an expression, then maybe we should just understand that the expression has been finished.
+                                //println!("OpenParen function");
+                                self.next();
+
+                                if let Token::Operator(Operator::CloseParen) = self.cur() {
+                                    self.push_operand(Expr::FunctionCall(
+                                        identifier_str.clone(),
+                                        vec![],
+                                    ));
+                                } else {
+                                    //println!("OpenParen -> NewStack");
+
+                                    self.new_stack();
+                                    let list_of_exprs = self.parse_comma_sep_list_expr();
+
+                                    // //println!("After parsing: ${:?}", list_of_exprs.unwrap().resulting_expr_list);
+
+                                    match list_of_exprs {
+                                        //try parse stuff
+                                        Ok(expressions) => {
+                                            //worked
+                                            //commit the result
+                                            let popped = self.pop_stack();
+                                            let resulting_exprs = expressions.resulting_expr_list;
+
+                                            //println!("Resulting expr in fcall: {:?}, cur_token = {:?}", resulting_exprs, self.cur());
+
+                                            self.push_operand(Expr::FunctionCall(
+                                                identifier_str.to_string(),
+                                                resulting_exprs,
+                                            ));
+
+                                            self.set_cur(popped.index);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed parsing exprssion: {:?}", e);
+                                            return Err(e);
+                                        }
+                                    }
+                                }
+                            } else {
+                                self.advance(-1); //is just a variable name, go back
+                                self.push_operand(Expr::Variable(identifier_str.to_string()));
+                            }
+                        }
+
+                        was_operand = true;
+                    }
+                    Token::LiteralInteger(i) => {
+                        //println!("Parsed literal integer {:?}", i);
+                        self.push_operand(Expr::IntegerValue(i));
+                        was_operand = true;
+                    }
+                    Token::LiteralFloat(f) => {
+                        self.push_operand(Expr::FloatValue(f));
+                        was_operand = true;
+                    }
+                    Token::LiteralString(f) => {
+                        self.push_operand(Expr::StringValue(f));
+                        was_operand = true;
+                    }
+                    Token::True => {
+                        self.push_operand(Expr::BooleanValue(true));
+                        was_operand = true;
+                    }
+                    Token::False => {
+                        self.push_operand(Expr::BooleanValue(false));
+                        was_operand = true;
+                    }
+                    Token::Operator(Operator::CloseParen) => {
+                        //println!("Closing expr");
+                        not_part_of_expr = true;
+                    }
+                    Token::Operator(o) => self.push_operator(o),
+                    _ => {
+                        not_part_of_expr = true;
+                    }
+                }
+            }
+            if not_part_of_expr {
+                //println!("broke with operands:  {:?}", self.operand_stack());
+                break;
+            } else {
+                self.next();
+            }
+
+            //-(5.0 / 9.0) * 32
+
+            if was_operand {
+                //println!("after parsing operand, cur operands: {:?}", self.operand_stack());
+
+                //base case: there is only an operator and an operand, like "-1"
+                if self.operand_stack().len() == 1 && self.operator_stack().len() == 1 {
+                    //println!("was operand ==1 stack == 1");
+                    let last_operand = self.operand_stack_mut().pop().unwrap();
+                    let op = self.operator_stack_mut().pop().unwrap();
+                    self.push_operand(Expr::UnaryExpression(op, Box::new(last_operand)));
+                }
+                //repeat case: 2 * -----2 or even 2 * -2, consume all the minus signals
+                else if self.operator_stack().len() > 1 && self.operand_stack().len() == 2 {
+                    //println!("was operand == 2 stack > 1");
+                    while self.operator_stack().len() > 1 {
+                        let last_operand = self.operand_stack_mut().pop().unwrap();
+                        let op = self.operator_stack_mut().pop().unwrap();
+
+                        self.push_operand(Expr::UnaryExpression(op, Box::new(last_operand)));
+                    }
+                }
+                //if it executes the previous if, we will have an operand, operator, and an unary exp operand
+
+                let has_sufficient_operands = self.operand_stack().len() >= 2;
+                let has_pending_operators = !self.operator_stack().is_empty();
+
+                if has_sufficient_operands && has_pending_operators {
+                    //println!("sufficient for binary");
+                    let rhs_root = self.operand_stack_mut().pop().unwrap();
+                    let lhs_root = self.operand_stack_mut().pop().unwrap();
+                    let op = self.operator_stack_mut().pop().unwrap();
+
+                    let mut bin_op = Expr::BinaryOperation(
+                        Box::new(lhs_root.clone()),
+                        op,
+                        Box::new(rhs_root.clone()),
+                    );
+                    if let Expr::BinaryOperation(lhs_down, op_down, rhs_down) = &lhs_root {
+                        let precedence_down = precedence(*op_down);
+                        let precedence_root = precedence(op);
+                        if precedence_root > precedence_down {
+                            bin_op = Expr::BinaryOperation(
+                                lhs_down.clone(),
+                                *op_down,
+                                Box::new(Expr::BinaryOperation(
+                                    rhs_down.clone(),
+                                    op,
+                                    Box::new(rhs_root.clone()),
+                                )),
+                            );
+                        }
+                    }
+                    if let Expr::BinaryOperation(lhs_down, op_down, rhs_down) = &rhs_root {
+                        let precedence_down = precedence(*op_down);
+                        let precedence_root = precedence(op);
+                        if precedence_root > precedence_down {
+                            bin_op = Expr::BinaryOperation(
+                                lhs_down.clone(),
+                                *op_down,
+                                Box::new(Expr::BinaryOperation(
+                                    rhs_down.clone(),
+                                    op,
+                                    Box::new(lhs_root.clone()),
+                                )),
+                            );
+                        }
+                    }
+                    self.push_operand(bin_op);
+                }
+            }
+        }
+
+        //println!("after loop operands:  {:?}", self.operand_stack());
+
+        //consume the remaining operators
+        if self.operand_stack().len() == 1 {
+            while self.operator_stack().len() > 0 {
+                //println!("popping operator and operand");
+                let expr = self.operand_stack_mut().pop().unwrap();
+                let operator = self.operator_stack_mut().pop().unwrap();
+                self.push_operand(Expr::UnaryExpression(operator, Box::new(expr)));
+            }
+        }
+
+        if !self.operator_stack().is_empty() {
+            return Err(ParsingError::ExprError(format!(
+                "Unparsed operators: {:?}, operands = {:?}",
+                self.operator_stack(),
+                self.operand_stack()
+            )));
+        }
+
+        if self.operand_stack().len() > 1 {
+            return Err(ParsingError::ExprError(format!(
+                "Unparsed operands: {:?}",
+                self.operand_stack()
+            )));
+        }
+
+        if self.operand_stack().is_empty() {
+            return Err(ParsingError::ExprError(String::from(
+                "Empty operand stack, didn't parse anything",
+            )));
+        }
+        //let remaining_tokens = Vec::from(token_queue);
+        let resulting_expr = clean_parens(self.operand_stack_mut().pop().unwrap());
+        //println!("returning expr:  {:?}", resulting_expr);
+
+        Ok(ParseExpressionResult {
+            resulting_expr: resulting_expr,
+        })
+    }
+
+    //expr, expr, ..., expr
+    fn parse_comma_sep_list_expr(&mut self) -> Result<ParseListExpressionResult, ParsingError> {
+        //println!("Started parsing comma separated, cur = {:?}", self.cur());
+
+        let mut expressions = vec![];
+        loop {
+            let parse_result = self.parse_expr();
+
+            match parse_result {
+                Ok(r) => {
+                    //println!("Parsed comma separated: {:?}", r.resulting_expr);
+                    expressions.push(r.resulting_expr);
+                }
+                Err(e) => {
+                    eprintln!("Error on parse: {:?}", e);
+                    break;
+                }
+            }
+
+            if self.can_go() {
+                if let Token::Comma = self.cur() {
+                    self.next();
+                    continue;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if expressions.is_empty() {
+            return Err(ParsingError::ExprError(String::from("While parsing list of expressions: no expression was found. Deal with edge cases before calling this expr.")));
+        }
+
+        Ok(ParseListExpressionResult {
+            resulting_expr_list: expressions,
+        })
+    }
 }
 
 struct ParseListExpressionResult {
-    remaining_tokens: Vec<Token>,
+    //remaining_tokens: Vec<&'a Token>,
     resulting_expr_list: Vec<Expr>,
 }
 
-fn parse_comma_sep_list_expr(tokens: Vec<Token>) -> ParseListExpressionResult {
-    let mut expressions = vec![];
-    let mut current_tokens = tokens;
-    let mut final_remaining_tokens = vec![];
-    loop {
-        let current_length = current_tokens.len();
-        let parse_result = parse_expr(current_tokens);
-        if parse_result.remaining_tokens.len() == current_length {
-            break;
-        }
-
-        let remaining_current_length = parse_result.remaining_tokens.len();
-        current_tokens = parse_result.remaining_tokens;
-        expressions.push(parse_result.resulting_expr);
-        if remaining_current_length == 0 {
-            break;
-        }
-        if let Token::Comma = current_tokens[0] {
-            current_tokens.remove(0);
-            continue;
-        } else {
-            final_remaining_tokens = current_tokens;
-            break;
-        }
-    }
-
-    ParseListExpressionResult {
-        resulting_expr_list: expressions,
-        remaining_tokens: final_remaining_tokens,
-    }
-}
-
-struct ParseExpressionResult {
-    remaining_tokens: Vec<Token>,
+pub struct ParseExpressionResult {
+    //remaining_tokens: Vec<&'a Token>,
     resulting_expr: Expr,
 }
 
 //Parses a single expression
-fn parse_expr(tokens: Vec<Token>) -> ParseExpressionResult {
+pub fn parse(tokens: Vec<Token>) -> Expr {
+    let mut parser = Parser::new(tokens);
+    return parser.parse_expr().unwrap().resulting_expr;
+}
 
-    
-    let mut token_queue = VecDeque::from(tokens);
-    let mut operator_stack: Vec<Operator> = vec![];
-    let mut operand_stack: Vec<Expr> = vec![];
-
-    loop {
-        if token_queue.is_empty() {
-            break;
-        }
-        let mut was_operand = false;
-        let mut not_part_of_expr = false;
-        //if there is an open paren, we collect all the tokens for this open paren
-        //and parse the sub-expression recursively
-        {
-            let tok = token_queue.pop_front().unwrap();
-            match tok {
-                Token::Operator(Operator::OpenParen) => {
-                    let mut between_parens = vec![];
-                    let mut close_parens_found = 0;
-                    let mut open_parens_found = 1; //1 for the tok
-                    loop {
-                        let next_token = token_queue.pop_front();
-                        if !next_token.is_some() {
-                            break;
-                        }
-                        let next_token = next_token.unwrap();
-
-                        if let Token::Operator(Operator::OpenParen) = next_token {
-                            open_parens_found = open_parens_found + 1;
-                        }
-
-                        if let Token::Operator(Operator::CloseParen) = next_token {
-                            close_parens_found = close_parens_found + 1;
-                            if open_parens_found == close_parens_found {
-                                break;
-                            }
-                        }
-                        between_parens.push(next_token);
-                    }
-
-                    if open_parens_found != close_parens_found {
-                        panic!("Mismatched parens!");
-                    }
-
-                    let parsed_subexpr = parse(between_parens);
-
-                    operand_stack.push(Expr::Parenthesized(Box::new(parsed_subexpr)));
-                    was_operand = true;
-                }
-                Token::Identifier(identifier_str) => {
-                    //if we have an identifier now,
-                    //then peek the next token to see if is a open paren.
-                    //if it is a open paren, then we are parsing a function.
-                    //Otherwise, consider that this is simply a variable
-                    let next_token = token_queue.front();
-
-                    if let Some(Token::Operator(Operator::OpenParen)) = next_token {
-                        //when we parse a funcion, we need to parse its arguments as well.
-                        //however, the list of arguments is a list of expressions, and those expressions might be
-                        //function calls as well.
-                        //like fcall(fcall(fcall(1, fcall(2)), fcall2(3, fcall())))....)
-                        //Unlike parenthesized expressions, in this case I cannot just fetch everything between
-                        //the parens because there are commas separating the arguments. I can't also fetch all
-                        //the tokens until I find a comma, because i would have a list of tokens containig
-                        //[fcall(fcall(fcall(1,] as my list of tokens to parse.
-                        //I will need to parse lists of expressions for other stuff as well, like array items and tuple items.
-                        //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
-                        //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
-                        //like it's part of an expression, then maybe we should just understand that the expression has been finished.
-                        let cur_token = token_queue.pop_front();
-                        if !cur_token.is_some() {
-                            break;
-                        }
-                        let cur_token = cur_token.unwrap(); //guaranteed to be OpenParen
-                        assert_eq!(cur_token, Token::Operator(Operator::OpenParen));
-
-                        if let Some(Token::Operator(Operator::CloseParen)) = token_queue.front() {
-                            token_queue.pop_front();
-                            operand_stack.push(Expr::FunctionCall(identifier_str, vec![]));
-                        } else {
-                            let list_of_exprs = parse_comma_sep_list_expr(Vec::from(token_queue));
-
-                            operand_stack.push(Expr::FunctionCall(
-                                identifier_str,
-                                list_of_exprs.resulting_expr_list,
-                            ));
-                            token_queue = VecDeque::from(list_of_exprs.remaining_tokens);
-                            assert_eq!(
-                                token_queue.front(),
-                                (Some(Token::Operator(Operator::CloseParen)).as_ref())
-                            );
-                            token_queue.pop_front();
-                        }
-                    } else {
-                        operand_stack.push(Expr::Variable(identifier_str));
-                    }
-                    was_operand = true;
-                }
-                Token::LiteralInteger(i) => {
-                    operand_stack.push(Expr::IntegerValue(i));
-                    was_operand = true;
-                }
-                Token::LiteralFloat(f) => {
-                    operand_stack.push(Expr::FloatValue(f));
-                    was_operand = true;
-                }
-                Token::Operator(Operator::CloseParen) => {
-                    not_part_of_expr = true;
-                    token_queue.push_front(tok);
-                }
-                Token::Operator(o) => {
-                    operator_stack.push(o)
-                },
-                _ => {
-                    not_part_of_expr = true;
-                    token_queue.push_front(tok);
-                }
-            }
-        }
-        if not_part_of_expr {
-            break;
-        }
-
-        //-(5.0 / 9.0) * 32
-       
-        if was_operand {
-            //base case: there is only an operator and an operand, like "-1"
-            if operand_stack.len() == 1 && operator_stack.len() == 1 {
-                let last_operand = operand_stack.pop().unwrap();
-                let op = operator_stack.pop().unwrap();
-                operand_stack.push(
-                    Expr::UnaryExpression(op, Box::new(last_operand)));
-                
-            }
-            //repeat case: 2 * -----2 or even 2 * -2, consume all the minus signals
-            else if operator_stack.len() > 1 && operand_stack.len() == 2 {
-                while operator_stack.len() > 1 {
-
-                    let last_operand = operand_stack.pop().unwrap();
-                    let op = operator_stack.pop().unwrap();
-
-                    operand_stack.push(
-                        Expr::UnaryExpression(op, Box::new(last_operand)));
-                }
-            }
-            //if it executes the previous if, we will have an operand, operator, and an unary exp operand 
-
-            let has_sufficient_operands = operand_stack.len() >= 2;
-            let has_pending_operators = !operator_stack.is_empty();
-
-            if has_sufficient_operands && has_pending_operators {
-                let rhs_root = operand_stack.pop().unwrap();
-                let lhs_root = operand_stack.pop().unwrap();
-                let op = operator_stack.pop().unwrap();
-
-
-                let mut bin_op = Expr::BinaryOperation(
-                    Box::new(lhs_root.clone()),
-                    op,
-                    Box::new(rhs_root.clone()),
-                );
-                if let Expr::BinaryOperation(lhs_down, op_down, rhs_down) = &lhs_root {
-                    let precedence_down = precedence(*op_down);
-                    let precedence_root = precedence(op);
-                    if precedence_root > precedence_down {
-                        bin_op = Expr::BinaryOperation(
-                            lhs_down.clone(),
-                            *op_down,
-                            Box::new(Expr::BinaryOperation(
-                                rhs_down.clone(),
-                                op,
-                                Box::new(rhs_root.clone()),
-                            )),
-                        );
-                    }
-                }
-                if let Expr::BinaryOperation(lhs_down, op_down, rhs_down) = &rhs_root {
-                    let precedence_down = precedence(*op_down);
-                    let precedence_root = precedence(op);
-                    if precedence_root > precedence_down {
-                        bin_op = Expr::BinaryOperation(
-                            lhs_down.clone(),
-                            *op_down,
-                            Box::new(Expr::BinaryOperation(
-                                rhs_down.clone(),
-                                op,
-                                Box::new(lhs_root.clone()),
-                            )),
-                        );
-                    }
-                }
-                operand_stack.push(bin_op);
-            }
-        
-        }
-    }
-
-    //consume the remaining operators
-    if operand_stack.len() == 1 {
-        while operator_stack.len() > 0 {
-            let expr = operand_stack.pop().unwrap();
-            operand_stack.push(Expr::UnaryExpression(operator_stack.pop().unwrap(), Box::new(expr)));
-        }
-    }
-
-
-    if !operator_stack.is_empty() {
-        panic!(
-            "Unparsed operators: {:?}, operands = {:?}",
-            operator_stack, operand_stack
-        );
-    }
-
-    if operand_stack.len() > 1 {
-        panic!("Unparsed operands: {:?}", operand_stack);
-    }
-
-    if operand_stack.is_empty() {
-        panic!("Empty operand stack, didn't parse anything");
-    }
-    let remaining_tokens = Vec::from(token_queue);
-    let resulting_expr = clean_parens(operand_stack.pop().unwrap());
-    ParseExpressionResult {
-        remaining_tokens,
-        resulting_expr,
-    }
+pub fn parse_ast(tokens: Vec<Token>) -> Vec<AST> {
+    let mut parser = Parser::new(tokens);
+    return parser.parse_ast().unwrap();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_literal_alone() {
+        //1 + 1
+        let result = parse(vec![Token::LiteralInteger(1)]);
+
+        let expected = Expr::IntegerValue(1);
+        assert_eq!(result, expected)
+    }
+
+    #[test]
+    fn parse_variable() {
+        //1 + 1
+        let result = parse(vec![Token::Identifier(String::from("x"))]);
+
+        let expected = Expr::Variable(String::from("x"));
+        assert_eq!(result, expected)
+    }
+
     #[test]
     fn parse_1_plus_1() {
         //1 + 1
@@ -688,6 +882,19 @@ mod tests {
     }
 
     #[test]
+    fn identifier_multiplied() {
+        let tokens = tokenize("some_identifier * 5").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            Operator::Multiply,
+            5.into(),
+        );
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn just_an_identifier() {
         let tokens = tokenize("some_identifier").unwrap();
         let result = parse(tokens);
@@ -819,6 +1026,20 @@ mod tests {
     }
 
     #[test]
+    fn function_call_with_nested_call_with_multiple_expr2() {
+        let tokens = tokenize("some_identifier(nested(1), 1)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::FunctionCall(
+            String::from("some_identifier"),
+            vec![
+                Expr::FunctionCall(String::from("nested"), vec![Expr::IntegerValue(1)]),
+                Expr::IntegerValue(1),
+            ],
+        );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn function_call_with_nested_call_with_multiple_expr_also_unnested() {
         let tokens = tokenize("some_identifier(nested(1 * 2, 2 / 3.4), 3, nested2())").unwrap();
         let result = parse(tokens);
@@ -836,6 +1057,54 @@ mod tests {
                 Expr::FunctionCall(String::from("nested2"), vec![]),
             ],
         );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn multiply_fcall() {
+        let tokens = tokenize("some_identifier(1) * 5").unwrap();
+        let result = parse(tokens);
+        let call = Expr::FunctionCall(String::from("some_identifier"), vec![Expr::IntegerValue(1)]);
+        let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn multiply_fcall_multiparams() {
+        let tokens = tokenize("some_identifier(1, 2) * 5").unwrap();
+        let result = parse(tokens);
+        let call = Expr::FunctionCall(
+            String::from("some_identifier"),
+            vec![Expr::IntegerValue(1), Expr::IntegerValue(2)],
+        );
+        let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn multiply_fcall_nested_last() {
+        let tokens = tokenize("some_identifier(nested()) * 5").unwrap();
+        let result = parse(tokens);
+        let call = Expr::FunctionCall(
+            String::from("some_identifier"),
+            vec![Expr::FunctionCall(String::from("nested"), vec![])],
+        );
+        let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn multiply_fcall_multiparam_nested_last() {
+        let tokens = tokenize("some_identifier(1, nested()) * 5").unwrap();
+        let result = parse(tokens);
+        let call = Expr::FunctionCall(
+            String::from("some_identifier"),
+            vec![
+                Expr::IntegerValue(1),
+                Expr::FunctionCall(String::from("nested"), vec![]),
+            ],
+        );
+        let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
         assert_eq!(expected, result);
     }
 
@@ -903,12 +1172,14 @@ mod tests {
     fn minus_expr() {
         let tokens = tokenize("-(5.0 / 9.0)").unwrap();
         let result = parse(tokens);
-        let expected = Expr::UnaryExpression(Operator::Minus, 
+        let expected = Expr::UnaryExpression(
+            Operator::Minus,
             Box::new(Expr::BinaryOperation(
                 (5.0).into(),
                 Operator::Divide,
-                (9.0).into()
-            )));
+                (9.0).into(),
+            )),
+        );
         assert_eq!(expected, result);
     }
 
@@ -917,31 +1188,25 @@ mod tests {
         let tokens = tokenize("2 * -1").unwrap();
         let result = parse(tokens);
         let expected = Expr::BinaryOperation(
-                (2).into(),
-                Operator::Multiply,
-                Box::new(Expr::UnaryExpression(
-                    Operator::Minus,
-                    1.into()
-                ))
-            );
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::UnaryExpression(Operator::Minus, 1.into())),
+        );
         assert_eq!(expected, result);
     }
-
 
     #[test]
     fn two_times_minus_repeated_one() {
         let tokens = tokenize("2 * --1").unwrap();
         let result = parse(tokens);
         let expected = Expr::BinaryOperation(
-                (2).into(),
-                Operator::Multiply,
-                Box::new(Expr::UnaryExpression(
-                    Operator::Minus,
-                    Box::new(Expr::UnaryExpression(
-                        Operator::Minus,
-                        1.into()
-                    ))))
-            );
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::UnaryExpression(
+                Operator::Minus,
+                Box::new(Expr::UnaryExpression(Operator::Minus, 1.into())),
+            )),
+        );
         assert_eq!(expected, result);
     }
 
@@ -950,17 +1215,16 @@ mod tests {
         let tokens = tokenize("2 * -+-1").unwrap();
         let result = parse(tokens);
         let expected = Expr::BinaryOperation(
-                (2).into(),
-                Operator::Multiply,
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::UnaryExpression(
+                Operator::Minus,
                 Box::new(Expr::UnaryExpression(
-                    Operator::Minus,
-                    Box::new(Expr::UnaryExpression(
-                        Operator::Plus,
-                        Box::new(Expr::UnaryExpression(
-                            Operator::Minus,
-                            1.into()
-                        ))))))
-            );
+                    Operator::Plus,
+                    Box::new(Expr::UnaryExpression(Operator::Minus, 1.into())),
+                )),
+            )),
+        );
         assert_eq!(expected, result);
     }
 
@@ -969,17 +1233,16 @@ mod tests {
         let tokens = tokenize("2 * (-+-1)").unwrap();
         let result = parse(tokens);
         let expected = Expr::BinaryOperation(
-                (2).into(),
-                Operator::Multiply,
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::UnaryExpression(
+                Operator::Minus,
                 Box::new(Expr::UnaryExpression(
-                    Operator::Minus,
-                    Box::new(Expr::UnaryExpression(
-                        Operator::Plus,
-                        Box::new(Expr::UnaryExpression(
-                            Operator::Minus,
-                            1.into()
-                        ))))))
-            );
+                    Operator::Plus,
+                    Box::new(Expr::UnaryExpression(Operator::Minus, 1.into())),
+                )),
+            )),
+        );
         assert_eq!(expected, result);
     }
 
@@ -988,23 +1251,21 @@ mod tests {
         let tokens = tokenize("2 * func(-+-1)").unwrap();
         let result = parse(tokens);
         let expected = Expr::BinaryOperation(
-                (2).into(),
-                Operator::Multiply,
-                Box::new(Expr::FunctionCall(
-                    String::from("func"),
-                    vec![Expr::UnaryExpression(
-                        Operator::Minus,
-                        Box::new(Expr::UnaryExpression(
-                            Operator::Plus,
-                            Box::new(Expr::UnaryExpression(
-                                Operator::Minus,
-                                1.into()
-                            )))))]
-                ))
-            );
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::FunctionCall(
+                String::from("func"),
+                vec![Expr::UnaryExpression(
+                    Operator::Minus,
+                    Box::new(Expr::UnaryExpression(
+                        Operator::Plus,
+                        Box::new(Expr::UnaryExpression(Operator::Minus, 1.into())),
+                    )),
+                )],
+            )),
+        );
         assert_eq!(expected, result);
     }
-
 
     #[test]
     fn fahrenheit_1_expr() {
@@ -1014,14 +1275,15 @@ mod tests {
 
         let dividend = Expr::BinaryOperation(
             Box::new(Expr::UnaryExpression(
-                Operator::Minus, 
+                Operator::Minus,
                 Box::new(Expr::BinaryOperation(
                     (5.0).into(),
                     Operator::Divide,
-                    (9.0).into()
-                )))),
+                    (9.0).into(),
+                )),
+            )),
             Operator::Multiply,
-            (32).into()
+            (32).into(),
         );
 
         assert_eq!(dividend, result);
@@ -1035,14 +1297,15 @@ mod tests {
 
         let dividend = Expr::BinaryOperation(
             Box::new(Expr::UnaryExpression(
-                Operator::Minus, 
+                Operator::Minus,
                 Box::new(Expr::BinaryOperation(
                     (5.0).into(),
                     Operator::Divide,
-                    (9.0).into()
-                )))),
+                    (9.0).into(),
+                )),
+            )),
             Operator::Multiply,
-            (32).into()
+            (32).into(),
         );
 
         let divisor = Expr::BinaryOperation(
@@ -1051,24 +1314,135 @@ mod tests {
             Box::new(Expr::BinaryOperation(
                 (5.0).into(),
                 Operator::Divide,
-                (9.0).into()
-            ))
+                (9.0).into(),
+            )),
         );
 
-        let fahrenheit = Expr::BinaryOperation(
-            Box::new(dividend),
-            Operator::Divide,
-            Box::new(divisor)
-        );
-        
+        let fahrenheit =
+            Expr::BinaryOperation(Box::new(dividend), Operator::Divide, Box::new(divisor));
+
         assert_eq!(fahrenheit, result);
     }
+
+    #[test]
+    fn test_assign() {
+        let tokens = tokenize("x = 1").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: Expr::IntegerValue(1),
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_parse_ast_first_token_is_identifier() {
+        let tokens = tokenize("x * 1").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::BinaryOperation(
+            Box::new(Expr::Variable(String::from("x"))),
+            Operator::Multiply,
+            1.into(),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_parse_assign_expr() {
+        let tokens = tokenize("x = x * 1").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: Expr::BinaryOperation(
+                Box::new(Expr::Variable(String::from("x"))),
+                Operator::Multiply,
+                1.into(),
+            ),
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_parse_just_id_ast() {
+        let tokens = tokenize("x").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::Variable(String::from("x")))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn not_operator() {
+        let tokens = tokenize("not True").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::UnaryExpression(Operator::Not, Box::new(Expr::BooleanValue(true)));
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn not_true_and_false() {
+        let tokens = tokenize("not (True and False)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::UnaryExpression(
+            Operator::Not,
+            Box::new(Expr::BinaryOperation(
+                Box::new(Expr::BooleanValue(true)),
+                Operator::And,
+                Box::new(Expr::BooleanValue(false)),
+            )),
+        );
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn assign_boolean_expr() {
+        let tokens = tokenize("x = not (True and False) or (False)").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: Expr::BinaryOperation(
+                Box::new(Expr::UnaryExpression(
+                    Operator::Not,
+                    Box::new(Expr::BinaryOperation(
+                        Box::new(Expr::BooleanValue(true)),
+                        Operator::And,
+                        Box::new(Expr::BooleanValue(false)),
+                    )),
+                )),
+                Operator::Or,
+                Box::new(Expr::BooleanValue(false)),
+            ),
+        }];
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn assign_string_expr() {
+        let tokens = tokenize("x = 'abc'").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: Expr::StringValue(String::from("abc")),
+        }];
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn assign_string_concat_expr() {
+        let tokens = tokenize("x = 'abc' + 'cde'").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: Expr::BinaryOperation(
+                Box::new(Expr::StringValue(String::from("abc"))),
+                Operator::Plus,
+                Box::new(Expr::StringValue(String::from("cde")))
+            ),
+        }];
+
+        assert_eq!(expected, result);
+    }
 }
-
-
-//2 * - 1
-//2 = operand [2], operator = []
-//* = operand [2], operator = [*]
-//- = operand [2], operator = [*-]
-//1 = operand [2, 1], operator = [*-]
-//*(- 2 1)

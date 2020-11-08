@@ -11,8 +11,11 @@ pub enum Operator {
     Not,
     Equals,
     NotEquals,
+    And,
+    Or,
+    Xor,
     OpenParen,
-    CloseParen
+    CloseParen,
 }
 #[derive(PartialOrd, PartialEq, Debug, Copy, Clone)]
 pub struct Float(pub f64);
@@ -31,15 +34,18 @@ impl Ord for Float {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Token {
     LiteralFloat(Float),
     LiteralInteger(i128),
+    LiteralString(String),
     Operator(Operator),
     Identifier(String),
     Assign,
+    True,
+    False,
     None,
-    Comma
+    Comma,
 }
 
 #[derive(Debug)]
@@ -47,24 +53,28 @@ enum PartialToken {
     UndefinedOrWhitespace,
     LiteralFloat(String),
     Operator(String),
-    Identifier(String), 
-    Comma
+    Identifier(String),
+    String(String),
+    Comma,
 }
 
 impl PartialToken {
     fn to_token(self) -> Token {
         match self {
-            Self::UndefinedOrWhitespace => panic!("Unexpected undefined token. This is a tokenizer bug."),
-            Self::Identifier(s) => {
-                if s == "None" {
-                    Token::None
-                } else {
-                    Token::Identifier(s)
-                }
+            Self::UndefinedOrWhitespace => {
+                panic!("Unexpected undefined token. This is a tokenizer bug.")
+            }
+            Self::Identifier(s) => match s.as_str() {
+                "None" => Token::None,
+                "not" => Token::Operator(Operator::Not),
+                "True" => Token::True,
+                "False" => Token::False,
+                "and" => Token::Operator(Operator::And),
+                "or" => Token::Operator(Operator::Or),
+                _ => Token::Identifier(s),
             },
             Self::Comma => Token::Comma,
             Self::LiteralFloat(s) => {
-                
                 if s.contains('.') || s.contains('e') {
                     match s.parse::<f64>() {
                         Ok(f) => Token::LiteralFloat(Float(f)),
@@ -77,23 +87,24 @@ impl PartialToken {
                     }
                 }
             },
-            Self::Operator(s) => {
-                match s.as_str() {
-                    "+" => Token::Operator(Operator::Plus),
-                    "-" => Token::Operator(Operator::Minus),
-                    "*" => Token::Operator(Operator::Multiply),
-                    "/" => Token::Operator(Operator::Divide),
-                    "<<" => Token::Operator(Operator::BitShiftLeft),
-                    ">>" => Token::Operator(Operator::BitShiftRight),
-                    "!" => Token::Operator(Operator::Not),
-                    "==" => Token::Operator(Operator::Equals),
-                    "=" => Token::Assign,
-                    "!=" => Token::Operator(Operator::NotEquals),
-                    "(" => Token::Operator(Operator::OpenParen),
-                    ")" => Token::Operator(Operator::CloseParen),
-                    _ => panic!("Unimplemented operator {}", s)
-                }
+            Self::String(s) => {
+                Token::LiteralString(s)
             }
+            Self::Operator(s) => match s.as_str() {
+                "+" => Token::Operator(Operator::Plus),
+                "-" => Token::Operator(Operator::Minus),
+                "*" => Token::Operator(Operator::Multiply),
+                "/" => Token::Operator(Operator::Divide),
+                "^" => Token::Operator(Operator::Xor),
+                "<<" => Token::Operator(Operator::BitShiftLeft),
+                ">>" => Token::Operator(Operator::BitShiftRight),
+                "==" => Token::Operator(Operator::Equals),
+                "=" => Token::Assign,
+                "!=" => Token::Operator(Operator::NotEquals),
+                "(" => Token::Operator(Operator::OpenParen),
+                ")" => Token::Operator(Operator::CloseParen),
+                _ => panic!("Unimplemented operator {}", s),
+            },
         }
     }
 }
@@ -152,7 +163,8 @@ impl Tokenizer {
     }
 
     fn eat_identifier(&mut self) -> bool {
-        let first_char_is_valid_identifier = self.can_go() && self.cur().is_ascii_alphabetic()  || self.cur() == '_';
+        let first_char_is_valid_identifier =
+            self.can_go() && self.cur().is_ascii_alphabetic() || self.cur() == '_';
 
         if first_char_is_valid_identifier {
             self.eater_buf.push(self.cur());
@@ -161,7 +173,7 @@ impl Tokenizer {
             return false;
         }
 
-        while self.can_go() && (self.cur().is_ascii_alphanumeric()  || self.cur() == '_') {
+        while self.can_go() && (self.cur().is_ascii_alphanumeric() || self.cur() == '_') {
             self.eater_buf.push(self.cur());
             self.next();
         }
@@ -177,6 +189,50 @@ impl Tokenizer {
         } else {
             false
         }
+    }
+
+    fn eat_string_literal(&mut self) -> bool {
+        let stop = self.cur();
+        if stop != '\'' && stop != '"' {
+            return false
+        }
+        self.next();
+        let mut is_escaping = false;
+        let mut finished = false;
+        while self.can_go() {
+            let cur = self.cur();
+            if cur == '\\' && !is_escaping {
+                is_escaping = true;
+                self.next();
+                continue
+            }
+            if is_escaping {
+                if stop == '\'' && cur == '\'' {
+                    self.eater_buf.push( '\'');
+                } else if stop == '"' && cur == '"' {
+                    self.eater_buf.push( '"');
+                }
+                else if cur == '\\' {
+                    self.eater_buf.push('\\');
+                } else {
+                    panic!("cannot escape char {}", cur);
+                }
+                is_escaping = false;
+                self.next();
+                continue;
+            }
+            if stop == '\'' && cur == '\'' {
+                finished = true;
+                break;
+            }
+            if stop == '"' && cur == '"' {
+                finished = true;
+                break;
+            }
+            self.eater_buf.push(cur);
+            self.next();
+        }
+        return finished;
     }
 
     fn commit_current_token(&mut self) {
@@ -220,7 +276,9 @@ impl Tokenizer {
     }
 
     pub fn tokenize(mut self) -> Result<Vec<Token>, String> {
-        let operators = &["+", "-", "*", "/", "<<", ">>", "!=", "==", "=", "!", "(", ")"];
+        let operators = &[
+            "+", "-", "*", "/", "<<", ">>", "!=", "==", "=", "^", "(", ")",
+        ];
         while self.can_go() {
             self.commit_current_token();
             if self.cur().is_numeric() {
@@ -233,13 +291,11 @@ impl Tokenizer {
                 self.eat_numbers();
                 self.cur_partial_token = PartialToken::LiteralFloat(self.clone_buf());
                 self.reset_eater_buffer();
-            } 
-            else if self.cur() == ',' {
+            } else if self.cur() == ',' {
                 self.cur_partial_token = PartialToken::Comma;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur().is_whitespace() {
+            } else if self.cur().is_whitespace() {
                 //if it's whitespace and there's a pending token, add it
                 self.next();
             } else if let Some(s) = self.match_first_and_advance(operators) {
@@ -249,6 +305,12 @@ impl Tokenizer {
                 self.eat_identifier();
                 self.cur_partial_token = PartialToken::Identifier(self.clone_buf());
                 self.reset_eater_buffer();
+            } else if self.cur() == '\'' || self.cur() == '"' {
+                self.eat_string_literal();
+                self.cur_partial_token = PartialToken::String(self.clone_buf());
+                self.commit_current_token();
+                self.reset_eater_buffer();
+                self.next();
             }
             else {
                 return Err(format!("Unrecognized token {}", self.cur()));
@@ -303,10 +365,7 @@ mod tests {
         let result = tokenize("6 +")?;
         assert_eq!(
             result,
-            [
-                Token::LiteralInteger(6),
-                Token::Operator(Operator::Plus)
-            ]
+            [Token::LiteralInteger(6), Token::Operator(Operator::Plus)]
         );
         Ok(())
     }
@@ -341,16 +400,16 @@ mod tests {
 
     #[test]
     fn tokenizer_unrecognized_token() -> Result<(), &'static str> {
-        let result = tokenize("10 ^ 12");
+        let result = tokenize("10 # 12");
         return match result {
-            Ok(_) => Err("Operator ^ doesnt exist and shouldn't be tokenized"),
-            Err(_) => Ok(())
-        }
+            Ok(_) => Err("Operator # doesnt exist and shouldn't be tokenized"),
+            Err(_) => Ok(()),
+        };
     }
 
     #[test]
     fn tokenizer_many_operators() -> Result<(), String> {
-        let result = tokenize("10 + - / * << >> ! != == -12")?;
+        let result = tokenize("10 + - / * << >> != == -12")?;
         assert_eq!(
             result,
             [
@@ -361,7 +420,6 @@ mod tests {
                 Token::Operator(Operator::Multiply),
                 Token::Operator(Operator::BitShiftLeft),
                 Token::Operator(Operator::BitShiftRight),
-                Token::Operator(Operator::Not),
                 Token::Operator(Operator::NotEquals),
                 Token::Operator(Operator::Equals),
                 Token::Operator(Operator::Minus),
@@ -444,62 +502,144 @@ mod tests {
     #[test]
     fn tokenier_opencloseparen() -> Result<(), String> {
         let result = tokenize("()")?;
-        assert_eq!(result, [Token::Operator(Operator::OpenParen), Token::Operator(Operator::CloseParen)]);
+        assert_eq!(
+            result,
+            [
+                Token::Operator(Operator::OpenParen),
+                Token::Operator(Operator::CloseParen)
+            ]
+        );
         Ok(())
     }
 
     #[test]
     fn tokenier_opencloseparen_with_expr() -> Result<(), String> {
         let result = tokenize("(1 + 2) * 3")?;
-        assert_eq!(result, [
-            Token::Operator(Operator::OpenParen), 
-            Token::LiteralInteger(1),
-            Token::Operator(Operator::Plus),
-            Token::LiteralInteger(2),
-            Token::Operator(Operator::CloseParen), 
-            Token::Operator(Operator::Multiply),
-            Token::LiteralInteger(3)]);
+        assert_eq!(
+            result,
+            [
+                Token::Operator(Operator::OpenParen),
+                Token::LiteralInteger(1),
+                Token::Operator(Operator::Plus),
+                Token::LiteralInteger(2),
+                Token::Operator(Operator::CloseParen),
+                Token::Operator(Operator::Multiply),
+                Token::LiteralInteger(3)
+            ]
+        );
         Ok(())
     }
 
     #[test]
     fn tokenizer_identifier() -> Result<(), String> {
         let result = tokenize("some_identifier")?;
-        assert_eq!(result, [
-            Token::Identifier(String::from("some_identifier"))]);
+        assert_eq!(result, [Token::Identifier(String::from("some_identifier"))]);
         Ok(())
     }
 
     #[test]
     fn tokenizer_function_call() -> Result<(), String> {
         let result = tokenize("some_identifier(1)")?;
-        assert_eq!(result, [
-            Token::Identifier(String::from("some_identifier")),
-            Token::Operator(Operator::OpenParen),
-            Token::LiteralInteger(1),
-            Token::Operator(Operator::CloseParen)
-            ]);
+        assert_eq!(
+            result,
+            [
+                Token::Identifier(String::from("some_identifier")),
+                Token::Operator(Operator::OpenParen),
+                Token::LiteralInteger(1),
+                Token::Operator(Operator::CloseParen)
+            ]
+        );
         Ok(())
     }
-
 
     #[test]
     fn assign_operator() -> Result<(), String> {
         let result = tokenize("x = 1")?;
-        assert_eq!(result, [
-            Token::Identifier(String::from("x")),
-            Token::Assign,
-            Token::LiteralInteger(1)
-            ]);
+        assert_eq!(
+            result,
+            [
+                Token::Identifier(String::from("x")),
+                Token::Assign,
+                Token::LiteralInteger(1)
+            ]
+        );
         Ok(())
     }
 
     #[test]
     fn none() -> Result<(), String> {
         let result = tokenize("None")?;
-        assert_eq!(result, [
-            Token::None
-        ]);
+        assert_eq!(result, [Token::None]);
+        Ok(())
+    }
+
+    #[test]
+    fn boolean_tokens() -> Result<(), String> {
+        let result = tokenize("not True and False or ^")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::Operator(Operator::Not),
+                Token::True,
+                Token::Operator(Operator::And),
+                Token::False,
+                Token::Operator(Operator::Or),
+                Token::Operator(Operator::Xor)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn string_literal() -> Result<(), String> {
+        let result = tokenize("'abc'")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::LiteralString(String::from("abc"))
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn string_literal_doublequotes() -> Result<(), String> {
+        let result = tokenize("\"abc\"")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::LiteralString(String::from("abc"))
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn string_literal_escapedouble() -> Result<(), String> {
+        let result = tokenize("\"a\\\"b\\\"c\"")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::LiteralString(String::from("a\"b\"c"))
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn string_literal_escapesingle() -> Result<(), String> {
+        let result = tokenize("\'a\\'b\\'c\'")?;
+        println!("result = {:?}", result);
+        assert_eq!(
+            result,
+            [
+                Token::LiteralString(String::from("a'b'c"))
+            ]
+        );
         Ok(())
     }
 }

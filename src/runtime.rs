@@ -27,6 +27,7 @@ pub enum PyObjectStructure {
         name: String,
         bounded_functions: HashMap<String, MemoryAddress>,
         unbounded_functions: HashMap<String, MemoryAddress>,
+        supertype: Option<MemoryAddress>
     },
     Module {
         name: String,
@@ -100,7 +101,6 @@ impl Memory {
         }
     }
 
-    #[cfg(test)]
     pub fn deallocate<'a>(&'a self, address: MemoryAddress) {
         {
             if address > self.memory.borrow().len() - 1 {
@@ -215,7 +215,8 @@ impl Interpreter {
             structure: PyObjectStructure::Type {
                 name: String::from("type"),
                 bounded_functions: HashMap::new(),
-                unbounded_functions: HashMap::new()
+                unbounded_functions: HashMap::new(),
+                supertype: None
             },
         }));
 
@@ -224,7 +225,8 @@ impl Interpreter {
             structure: PyObjectStructure::Type {
                 name: String::from("NoneType"),
                 bounded_functions: HashMap::new(),
-                unbounded_functions: HashMap::new()
+                unbounded_functions: HashMap::new(),
+                supertype: None
             },
         }));
 
@@ -238,7 +240,8 @@ impl Interpreter {
             structure: PyObjectStructure::Type {
                 name: String::from("NotImplemented"),
                 bounded_functions: HashMap::new(),
-                unbounded_functions: HashMap::new()
+                unbounded_functions: HashMap::new(),
+                supertype: None
             },
         }));
 
@@ -252,7 +255,8 @@ impl Interpreter {
             structure: PyObjectStructure::Type {
                 name: String::from("function"),
                 bounded_functions: HashMap::new(),
-                unbounded_functions: HashMap::new()
+                unbounded_functions: HashMap::new(),
+                supertype: None
             },
         }));
 
@@ -261,7 +265,8 @@ impl Interpreter {
             structure: PyObjectStructure::Type {
                 name: String::from("module"),
                 bounded_functions: HashMap::new(),
-                unbounded_functions: HashMap::new()
+                unbounded_functions: HashMap::new(),
+                supertype: None
             },
         }));
 
@@ -290,14 +295,16 @@ impl Interpreter {
         module: &str,
         name: &str,
         methods: HashMap<String, MemoryAddress>,
-        functions: HashMap<String, MemoryAddress>
+        functions: HashMap<String, MemoryAddress>,
+        supertype: Option<MemoryAddress>
     ) -> MemoryAddress {
         let created_type = PyObject {
             type_addr: self.special_values.type_type,
             structure: PyObjectStructure::Type {
                 name: name.to_string(),
                 bounded_functions: methods,
-                unbounded_functions: functions
+                unbounded_functions: functions,
+                supertype
             },
         };
         let type_address = self.allocate_and_write(Box::new(created_type));
@@ -407,7 +414,8 @@ impl Interpreter {
                 PyObjectStructure::Type {
                     name: _,
                     bounded_functions,
-                    unbounded_functions: _
+                    unbounded_functions: _,
+                    supertype: _
                 } => {
                     match bounded_functions.get(method_name) {
                         Some(addr) => Some(*addr),
@@ -422,6 +430,18 @@ impl Interpreter {
         })
     }
 
+    pub fn call_method(&self, addr: MemoryAddress, method_name: &str, params: Vec<MemoryAddress>) -> Option<MemoryAddress> {
+        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+        self.get_type_method_addr_byname(pyobj.type_addr, method_name).map(move |method_addr| {
+            self.callable_call(method_addr, CallParams {
+                bound_pyobj: Some(addr),
+                func_address: method_addr,
+                func_name: Some(method_name.to_string()),
+                params
+            })
+        })
+    }
+
 
     pub fn get_type_name(&self, addr: MemoryAddress) -> &str {
         match self.get_pyobj_byaddr(addr) {
@@ -429,7 +449,8 @@ impl Interpreter {
                 PyObjectStructure::Type {
                     name,
                     bounded_functions: _,
-                    unbounded_functions: _
+                    unbounded_functions: _,
+                    supertype: _
                 } => {
                     return &name;
                 }
@@ -581,7 +602,7 @@ impl Interpreter {
         if let PyObjectStructure::Type {
             name: _,
             bounded_functions,
-            unbounded_functions: _,
+            unbounded_functions: _, supertype: _
         } = &type_pyobj.structure
         {
             let memory_addr = bounded_functions.get(method_name);
@@ -620,6 +641,7 @@ impl Interpreter {
             name: _,
             bounded_functions: _,
             unbounded_functions: _,
+            supertype: _
         } = &type_pyobj.structure
         {
             let bounded_method = self.get_pyobj_byaddr(method_addr);
@@ -707,6 +729,14 @@ impl Interpreter {
         }
     }
 
+    pub fn top_stack(&self) -> MemoryAddress {
+        match self.stack.borrow().last().unwrap().stack.last() {
+            Some(addr) => *addr,
+            None => panic!("Attempt to get top of stack on empty stack!")
+        }
+    }
+
+
     pub fn push_stack(&self, value: MemoryAddress) {
         self.stack.borrow_mut().last_mut().unwrap().stack.push(value)
     }
@@ -719,18 +749,16 @@ impl Interpreter {
         }
     }
 
-    #[cfg(test)]
     pub fn bind_local(&self, name: &str, addr: MemoryAddress) {
         let mut current_stack = self.stack.borrow_mut();
         let current_frame = current_stack.last_mut().unwrap();
         current_frame.values.insert(name.to_string(), addr);
     }
-
-    #[cfg(test)]
-    pub fn get_local(&self, name: &str) -> MemoryAddress {
+  
+    pub fn get_local(&self, name: &str) -> Option<MemoryAddress> {
         let mut current_stack = self.stack.borrow_mut();
         let current_frame = current_stack.last_mut().unwrap();
-        *current_frame.values.get(name).unwrap()
+        current_frame.values.get(name).map(|a| *a)
     }
 
     #[cfg(test)]
@@ -748,8 +776,13 @@ impl Interpreter {
         self.prog_counter.get()
     }
 
-    pub fn jump_pc(&self, delta: usize) -> usize {
-        self.prog_counter.set(self.prog_counter.get() + delta);
+    pub fn jump_pc(&self, delta: isize) -> usize {
+        self.prog_counter.set((self.prog_counter.get() as isize + delta) as usize);
+        self.prog_counter.get()
+    }
+
+    pub fn set_pc(&self, pc: usize) -> usize {
+        self.prog_counter.set(pc);
         self.prog_counter.get()
     }
 }
@@ -773,6 +806,15 @@ mod tests {
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
         let pyobj_int_addr = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
+        let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
+        assert_eq!(1, *result_value);
+    }
+
+    #[test]
+    fn simply_instantiate_bool() {
+        let interpreter = Interpreter::new();
+        register_builtins(&interpreter);
+        let pyobj_int_addr = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
         let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
         assert_eq!(1, *result_value);
     }
@@ -869,7 +911,7 @@ mod tests {
         let number = interpreter.allocate_type_byname_raw("int", Box::new(17 as i128));
         interpreter.bind_local("x", number);
 
-        let addr_local = interpreter.get_local("x");
+        let addr_local = interpreter.get_local("x").unwrap();
         let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(addr_local);
 
         assert_eq!(result_value, 17 as i128);
