@@ -36,7 +36,8 @@ The interpreter runtime in `runtime.rs` implements the data model, function call
 it is interpreted right away.
 
 I try to follow the python bytecode specification, but I do some stuff differently. For instance: I call the binary functions
-for add, subtract, multiply and divide directly like `__add__`, `__sub__`, etc. It also implements everything as an object.
+for add, subtract, multiply and divide directly like `__add__`, `__sub__`, etc instead of having opcodes for 
+these binary operations. It also implements everything as an object.
 
 - Numbers are `PyObject` of type `int` or `float`
 - Functions are `PyObject` of type `function`
