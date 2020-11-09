@@ -38,14 +38,14 @@ it is interpreted right away.
 I try to follow the python bytecode specification, but I do some stuff differently. For instance: I call the binary functions
 for add, subtract, multiply and divide directly like `__add__`, `__sub__`, etc. It also implements everything as an object.
 
-    - Numbers are `PyObject` of type `int` or `float`
-    - Functions are `PyObject` of type `function`
-    - Built-in methods in numbers are `PyObject` of type `function`, but they are bounded to a `PyObject` instance
+- Numbers are `PyObject` of type `int` or `float`
+- Functions are `PyObject` of type `function`
+- Built-in methods in numbers are `PyObject` of type `function`, but they are bounded to a `PyObject` instance
 
 Does it work?
 -------------
 
-There are 107 tests so far, they test almost everything and they all pass. 
+There are 119 tests so far, they test almost everything and they all pass. 
 
 Is it stable?
 -------------
