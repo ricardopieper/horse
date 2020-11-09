@@ -15,8 +15,8 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ASTIfStatement {
-    expression: Expr,
-    statements: Vec<AST>,
+    pub expression: Expr,
+    pub statements: Vec<AST>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +31,11 @@ pub enum AST {
         elifs: Vec<ASTIfStatement>,
         final_else: Option<Vec<AST>>,
     },
+    WhileStatement {
+        expression: Expr,
+        body: Vec<AST>,
+    },
+    Break
 }
 
 impl Expr {
@@ -149,9 +154,17 @@ impl Parser {
         self.cur_offset(0)
     }
 
+    fn cur_opt(&self) -> Option<&Token> {
+        self.cur_offset_opt(0)
+    }
+
     fn cur_offset(&self, offset: isize) -> &Token {
+        return self.cur_offset_opt(offset).unwrap()
+    }
+
+    fn cur_offset_opt(&self, offset: isize) -> Option<&Token> {
         let index = self.parsing_state.last().unwrap().index as isize + offset;
-        self.tokens.get(index as usize).unwrap()
+        self.tokens.get(index as usize)
     }
 
     fn is_last(&self) -> bool {
@@ -235,7 +248,6 @@ impl Parser {
                 None
             } else {
                 let expr = self.parse_expr().expect("Expected expr").resulting_expr;
-                println!("if statement: {:?}", expr);
                 if let Token::Colon = self.cur() {
                     self.next();
                 } else {
@@ -305,6 +317,41 @@ impl Parser {
         }
     }
 
+    pub fn parse_while_statement(&mut self) -> Option<AST> {
+        if let Token::WhileKeyword = self.cur().clone() {
+            self.next();
+            if !self.can_go() {
+                None
+            } else {
+                let expr = self.parse_expr().expect("Expected expr").resulting_expr;
+                if let Token::Colon = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected colon after while expr");
+                }
+
+                if let Token::NewLine = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected newline after colon");
+                }
+
+                self.increment_expected_indent();
+                let ast = self.parse_ast().unwrap();
+                let while_statement = AST::WhileStatement {
+                    expression: expr,
+                    body: ast,
+                };
+                self.decrement_expected_indent();
+
+                return Some(while_statement);
+            }
+        } else {
+            None
+        }
+    }
+
+
     //returns the identation level until the first non-whitespace token
     //final state of this function is right at newline, before the identations
     fn skip_whitespace_newline(&mut self) -> usize {
@@ -337,7 +384,6 @@ impl Parser {
                 //correct indentation found: commit
                 self.set_cur(popped.index);
             } else {
-                println!("Ended identation, cur = {:?}", self.cur());
                 self.pop_stack();
                 return Ok(results);
             }
@@ -351,7 +397,6 @@ impl Parser {
             if !parsed_successfully {
                 self.new_stack();
                 if let Some(assign_ast) = self.parse_assign() {
-                    println!("Parsed Assign: {:?}", assign_ast);
                     results.push(assign_ast);
                     parsed_successfully = true;
                     let popped = self.pop_stack();
@@ -371,7 +416,6 @@ impl Parser {
                 let expr = self.parse_if_statement();
                 match expr {
                     Some(ast_if) => {
-                        println!("Parsed IF: {:?}", ast_if);
                         results.push(ast_if);
                         parsed_successfully = true;
                         let popped = self.pop_stack();
@@ -391,8 +435,54 @@ impl Parser {
 
             if !parsed_successfully {
                 self.new_stack();
+                let expr = self.parse_while_statement();
+                match expr {
+                    Some(ast_if) => {
+                        results.push(ast_if);
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after if block"
+                        );
+                    }
+                    None => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let tok = self.cur();
+                match tok {
+                    Token::BreakKeyword => {
+                        results.push(AST::Break);
+                        self.next();
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after if block, got {:?}",
+                            self.cur_opt()
+                        );
+                    }
+                    _ => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+
+            if !parsed_successfully {
+                self.new_stack();
                 let expr = self.parse_expr()?;
-                println!("Parsed Standalone: {:?}", expr.resulting_expr);
                 results.push(AST::StandaloneExpr(expr.resulting_expr));
                 let popped = self.pop_stack();
                 //correct indentation found: commit
@@ -409,12 +499,6 @@ impl Parser {
             }
 
             if self.is_not_end() {
-                println!(
-                    "parse_ast reached end with cur = {:?}, parsed = {:?}",
-                    self.cur(),
-                    results
-                );
-
                 if !self.cur_is_newline() {
                     panic!(
                         "is not end but is also not newline, cur = {:?}, parsed = {:?}",
@@ -791,6 +875,36 @@ y = x + str(True)",
         assert_eq!(expected, result);
     }
 
+    #[test]
+    fn while_statement() {
+        let tokens = tokenize("
+while True:
+    x = 1
+    break
+",
+        )
+        .unwrap();
+
+        println!("Tokens: {:?}", tokens);
+
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::WhileStatement {
+                expression: Expr::BooleanValue(true),
+                body: vec![
+                    AST::Assign{
+                        variable_name: String::from("x"), 
+                        expression: Expr::IntegerValue(1)
+                    },
+                    AST::Break
+                ]
+            }
+        ];
+        assert_eq!(expected, result);
+    }
+
+
+    
     #[test]
     fn if_statement_with_print_after_and_newlines_before_and_after() {
         let tokens = tokenize(

@@ -6,6 +6,7 @@ const OR_STR : &'static str = "__or__";
 const XOR_STR : &'static str = "__xor__";
 const NOT_STR : &'static str = "__not__";
 
+
 fn create_and_method(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
     let func = PyCallable {
         code: Box::new(move |interpreter, params| -> MemoryAddress {
@@ -271,7 +272,6 @@ fn create_to_float(interpreter: & Interpreter, methods: &mut HashMap<String, Mem
     methods.insert("__float__".to_string(), func_addr);
 }
 
-
 pub fn register_boolean_type(interpreter: &Interpreter) -> MemoryAddress {
     let mut methods = HashMap::new();
 
@@ -286,6 +286,7 @@ pub fn register_boolean_type(interpreter: &Interpreter) -> MemoryAddress {
     create_to_int(interpreter, &mut methods);
     create_to_float(interpreter, &mut methods);
 
+    
     //bool inherits from int
     
     let int_supertype = interpreter.find_in_module(BUILTIN_MODULE, "int").expect("int type not found");

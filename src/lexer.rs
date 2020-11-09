@@ -16,6 +16,10 @@ pub enum Operator {
     Xor,
     OpenParen,
     CloseParen,
+    Greater,
+    GreaterEquals,
+    Less,
+    LessEquals
 }
 #[derive(PartialOrd, PartialEq, Debug, Copy, Clone)]
 pub struct Float(pub f64);
@@ -49,6 +53,8 @@ pub enum Token {
     Comma,
     Colon,
     IfKeyword,
+    WhileKeyword,
+    BreakKeyword,
     ElifKeyword,
     ElseKeyword,
     Indentation
@@ -82,6 +88,8 @@ impl PartialToken {
                 "if" => Token::IfKeyword,
                 "elif" => Token::ElifKeyword,
                 "else" => Token::ElseKeyword,
+                "while" => Token::WhileKeyword,
+                "break" => Token::BreakKeyword,
                 _ => Token::Identifier(s),
             },
             Self::Comma => Token::Comma,
@@ -116,6 +124,10 @@ impl PartialToken {
                 "!=" => Token::Operator(Operator::NotEquals),
                 "(" => Token::Operator(Operator::OpenParen),
                 ")" => Token::Operator(Operator::CloseParen),
+                ">" => Token::Operator(Operator::Greater),
+                "<" => Token::Operator(Operator::Less),
+                ">=" => Token::Operator(Operator::GreaterEquals),
+                "<=" => Token::Operator(Operator::LessEquals),
                 _ => panic!("Unimplemented operator {}", s),
             },
         }
@@ -290,7 +302,7 @@ impl Tokenizer {
 
     pub fn tokenize(mut self) -> Result<Vec<Token>, String> {
         let operators = &[
-            "+", "-", "*", "/", "<<", ">>", "!=", "==", "=", "^", "(", ")",
+            "+", "-", "*", "/", "<<", ">>", "<=", ">=", ">", "<", "!=", "==", "=", "^", "(", ")",
         ];
         while self.can_go() {
             self.commit_current_token();

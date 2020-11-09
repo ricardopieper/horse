@@ -17,6 +17,9 @@ pub enum Instruction {
     LoadName(String),
     CallMethod { number_arguments: usize },
     CallFunction { number_arguments: usize },
+    JumpIfFalseAndPopStack(usize),
+    JumpUnconditional(usize),
+    UnresolvedBreak
 }
 
 pub fn handle_method_call(interpreter: &Interpreter, number_args: usize) {
@@ -127,12 +130,30 @@ pub fn handle_store_name(interpreter: &Interpreter, name: &str) {
     interpreter.bind_local(name, addr)
 }
 
+//returns true if jumped
+pub fn handle_jump_if_false_pop(interpreter: &Interpreter, destination: usize) -> bool {
+    let stack_top = interpreter.pop_stack();
+    let as_boolean = interpreter.call_method(stack_top, "__bool__", vec![]).unwrap();
+    let raw_value: i128 = *interpreter.get_raw_data_of_pyobj::<i128>(as_boolean);
+    if raw_value == 0 {
+        interpreter.set_pc(destination);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub fn handle_jump_unconditional(interpreter: &Interpreter, destination: usize) {
+    interpreter.set_pc(destination);
+}
+
+
 pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruction>) {
-    #[cfg(test)]
+   #[cfg(test)]
     {
         println!("Executing instructions");
-        for inst in instructions.iter() {
-            println!("{:?}", inst);
+        for (index, inst) in instructions.iter().enumerate() {
+            println!("{} - {:?}", index, inst);
         }
     }
 
@@ -140,6 +161,8 @@ pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruc
         if interpreter.get_pc() >= instructions.len() {
             return;
         }
+
+        let mut advance_pc = true;
 
         match instructions.get(interpreter.get_pc()).unwrap() {
             Instruction::CallMethod { number_arguments } => {
@@ -153,7 +176,17 @@ pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruc
             }
             Instruction::LoadName(name) => handle_load_name(interpreter, name.as_str()),
             Instruction::StoreName(name) => handle_store_name(interpreter, name.as_str()),
+            Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(interpreter, *destination),
+            Instruction::JumpUnconditional(destination) =>{
+                handle_jump_unconditional(interpreter, *destination);
+                advance_pc = false;
+            },
+            Instruction::UnresolvedBreak => {
+                panic!("Unsupported instruction: UnresolvedBreak");
+            }
         }
-        interpreter.jump_pc(1);
+        if advance_pc {
+            interpreter.jump_pc(1);
+        }
     }
 }

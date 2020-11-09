@@ -22,6 +22,56 @@ fn create_concat(interpreter: & Interpreter, methods: &mut HashMap<String, Memor
 }
 
 
+fn create_eq(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
+    let func = PyCallable {
+        code: Box::new(move |interpreter, params| -> MemoryAddress {
+            check_builtin_func_params(params.func_name.unwrap().as_str(), 1, params.params.len());
+            let self_data = interpreter.get_raw_data_of_pyobj::<String>(params.bound_pyobj.unwrap());
+            let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
+
+            if other_type_name == "str" {
+                let other_str = interpreter.get_raw_data_of_pyobj::<String>(params.params[0]);
+
+                if self_data == other_str {
+                    interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128))
+                } else {
+                    interpreter.allocate_type_byname_raw("bool", Box::new(0 as i128))
+                }
+            } else {
+                interpreter.allocate_type_byname_raw("bool", Box::new(0 as i128))
+            }
+        })
+    };
+    let func_addr = interpreter.create_callable_pyobj(func, Some("__eq__".to_string()));
+    methods.insert("__eq__".to_string(), func_addr);
+}
+
+
+fn create_neq(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
+    let func = PyCallable {
+        code: Box::new(move |interpreter, params| -> MemoryAddress {
+            check_builtin_func_params(params.func_name.unwrap().as_str(), 1, params.params.len());
+            let self_data = interpreter.get_raw_data_of_pyobj::<String>(params.bound_pyobj.unwrap());
+            let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
+
+            if other_type_name == "str" {
+                let other_str = interpreter.get_raw_data_of_pyobj::<String>(params.params[0]);
+
+                if self_data == other_str {
+                    interpreter.allocate_type_byname_raw("bool", Box::new(0 as i128))
+                } else {
+                    interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128))
+                }
+            } else {
+                interpreter.allocate_type_byname_raw("bool", Box::new(0 as i128))
+            }
+        })
+    };
+    let func_addr = interpreter.create_callable_pyobj(func, Some("__ne__".to_string()));
+    methods.insert("__ne__".to_string(), func_addr);
+}
+
+
 fn create_to_int(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
     let func = PyCallable {
         code: Box::new(move |interpreter, params| -> MemoryAddress {
@@ -33,6 +83,21 @@ fn create_to_int(interpreter: & Interpreter, methods: &mut HashMap<String, Memor
     };
     let func_addr = interpreter.create_callable_pyobj(func, Some("__int__".to_string()));
     methods.insert("__int__".to_string(), func_addr);
+}
+
+
+fn create_string_transform<F>(interpreter: & Interpreter, name: &str, methods: &mut HashMap<String, MemoryAddress>,
+    transform: F) where F: Fn(&String) -> String + 'static {
+    let func = PyCallable {
+        code: Box::new(move |interpreter, params| -> MemoryAddress {
+            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
+            let self_data = interpreter.get_raw_data_of_pyobj::<String>(params.bound_pyobj.unwrap());
+            let transformed = (transform)(self_data); 
+            interpreter.allocate_type_byname_raw("str", Box::new(transformed))
+        })
+    };
+    let func_addr = interpreter.create_callable_pyobj(func, Some(name.to_string()));
+    methods.insert(name.to_string(), func_addr);
 }
 
 
@@ -106,8 +171,14 @@ pub fn register_string_type(interpreter: &Interpreter) -> MemoryAddress {
     create_to_float(interpreter, &mut methods);
     create_repr(interpreter, &mut methods);
 
+    create_eq(interpreter, &mut methods);
+    create_neq(interpreter, &mut methods);
+
     let mut functions = HashMap::new();
     create_new(interpreter, &mut functions);
+
+    create_string_transform(interpreter, "lower", &mut methods, |s| s.to_lowercase());
+    create_string_transform(interpreter, "upper", &mut methods, |s| s.to_uppercase());
 
     let created_type = interpreter.create_type(BUILTIN_MODULE, "str", methods, functions, None);
     return created_type;
