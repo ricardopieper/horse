@@ -3,14 +3,21 @@ slowpython
 
 This is a toy implementation of Python in Rust.
 
-For now, the only Python-y thing it has is the runtime system, where I'm trying to implement something
-similar to the Python data model.
+Currently, stuff like this should work:
 
-So far, I only parse and execute expressions, like `1 + sin(cos(9.3)) / 2 + 2 * 4 / (5 / 1.2)`.
-In actual, real-life, production-ready Python, it would be `math.sin` but I don't like it, 
-so I put these functions in the `__builtin__` module. There is no method accessor syntax as of now.
+    x = 0
+    y = 0
+    while x < 10:
+        y = y + 1
+        x = x + 1
+        if x == 5:
+            print(sin(x))
+            break
 
-The implemented types as of now are `NoneType`, `NotImplemented`, `int` and `float`, `bool` and `str`.
+The math functions in the `math` module were added to the `__builtin__` module for convenience. There is also a 
+`print` function, which takes 1 argument.
+
+The implemented types as of now are `NoneType`, `NotImplemented`, `int` and `float`, `bool` and `str`. They are not complete.
 
 The plan is to be able to run a reasonable Python program, therefore support for strings, 
 classes, etc may come in the future.

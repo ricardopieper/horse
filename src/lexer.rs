@@ -373,7 +373,6 @@ impl Tokenizer {
 }
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>, String> {
-    println!("Source to tokenize: {}", source);
     Tokenizer::new(source).tokenize()
 }
 
@@ -628,7 +627,6 @@ mod tests {
     #[test]
     fn boolean_tokens() -> Result<(), String> {
         let result = tokenize("not True and False or ^")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [
@@ -646,7 +644,6 @@ mod tests {
     #[test]
     fn string_literal() -> Result<(), String> {
         let result = tokenize("'abc'")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [
@@ -659,7 +656,6 @@ mod tests {
     #[test]
     fn string_literal_doublequotes() -> Result<(), String> {
         let result = tokenize("\"abc\"")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [
@@ -672,7 +668,6 @@ mod tests {
     #[test]
     fn string_literal_escapedouble() -> Result<(), String> {
         let result = tokenize("\"a\\\"b\\\"c\"")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [
@@ -685,7 +680,6 @@ mod tests {
     #[test]
     fn string_literal_escapesingle() -> Result<(), String> {
         let result = tokenize("\'a\\'b\\'c\'")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [
@@ -699,7 +693,6 @@ mod tests {
     fn tokenize_if() -> Result<(), String> {
         let result = tokenize("if x == 0:
     x = x + 1")?;
-        println!("result = {:?}", result);
         assert_eq!(
             result,
             [

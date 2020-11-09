@@ -92,54 +92,60 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize) -> Vec<Instruction> {
     let mut all_instructions = vec![];
     for ast_item in ast {
         match ast_item {
-            AST::Assign { variable_name, expression } => {
+            AST::Assign {
+                variable_name,
+                expression,
+            } => {
                 all_instructions.append(&mut compile_expr(expression));
                 all_instructions.push(Instruction::StoreName(variable_name));
             }
             AST::StandaloneExpr(expr) => {
-              all_instructions.append(&mut compile_expr(expr)); 
-            },
-            AST::IfStatement { true_branch, elifs: _, final_else } => {
-                
+                all_instructions.append(&mut compile_expr(expr));
+            }
+            AST::IfStatement {
+                true_branch,
+                elifs: _,
+                final_else,
+            } => {
                 let mut if_expr_compiled = compile_expr(true_branch.expression);
-                println!("len of expr if {}", if_expr_compiled.len());
                 all_instructions.append(&mut if_expr_compiled);
-                println!("after append len of all_instr = {}", all_instructions.len());
-                
-                //+1 is because there will be a instruction before 
+
+                //+1 is because there will be a instruction before
                 //that will do the jump
                 let offset_before_if = offset + all_instructions.len() + 1;
 
-                let mut true_branch_compiled = compile_ast(true_branch.statements, offset_before_if);
+                let mut true_branch_compiled =
+                    compile_ast(true_branch.statements, offset_before_if);
                 //generate a jump to the code right after the true branch
-                println!("length of true branch = {}", true_branch_compiled.len());
 
                 //if there is an else: statement, the true branch must jump to after the false branch
                 if let Some(else_ast) = final_else {
+                    //+1 because where will be a jump unconditional that is *part* of the true branch
 
-                  //+1 because where will be a jump unconditional that is *part* of the true branch
-          
-                    let offset_after_true_branch = offset_before_if + true_branch_compiled.len() + 1;
-                    println!("offset_after_true_branch = {}", offset_after_true_branch);    
-                    all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_true_branch));
+                    let offset_after_true_branch =
+                        offset_before_if + true_branch_compiled.len() + 1;
+                    all_instructions.push(Instruction::JumpIfFalseAndPopStack(
+                        offset_after_true_branch,
+                    ));
                     all_instructions.append(&mut true_branch_compiled);
-                   
+
                     let mut false_branch_compiled = compile_ast(else_ast, offset_after_true_branch);
 
                     //+1 because there will be an instruction
                     //in the true branch that will jump to *after* the false branch
-                    let offset_after_else = offset_after_true_branch + false_branch_compiled.len() + 1;
+                    let offset_after_else =
+                        offset_after_true_branch + false_branch_compiled.len() + 1;
                     all_instructions.push(Instruction::JumpUnconditional(offset_after_else));
                     all_instructions.append(&mut false_branch_compiled);
                 } else {
                     let offset_after_true_branch = offset_before_if + true_branch_compiled.len();
-                    println!("offset_after_true_branch = {}", offset_after_true_branch);    
-                    all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_true_branch));
+                    all_instructions.push(Instruction::JumpIfFalseAndPopStack(
+                        offset_after_true_branch,
+                    ));
                     all_instructions.append(&mut true_branch_compiled);
                 }
-
             }
-            AST::WhileStatement {expression, body} => {
+            AST::WhileStatement { expression, body } => {
                 let offset_before_while = all_instructions.len() + offset;
                 let mut compiled_expr = compile_expr(expression);
                 //+1 for the jump if false
@@ -149,20 +155,23 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize) -> Vec<Instruction> {
                 let offset_after_body = offset_after_expr + compiled_body.len() + 1;
                 all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_body));
 
-                let mut compiled_body_resolved_breaks: Vec<Instruction> = compiled_body.into_iter().map( |instr| -> Instruction {
-                    if let Instruction::UnresolvedBreak = instr {
-                        Instruction::JumpUnconditional(offset_after_body)
-                    } else {
-                        instr
-                    }
-                }).collect();
+                let mut compiled_body_resolved_breaks: Vec<Instruction> = compiled_body
+                    .into_iter()
+                    .map(|instr| -> Instruction {
+                        if let Instruction::UnresolvedBreak = instr {
+                            Instruction::JumpUnconditional(offset_after_body)
+                        } else {
+                            instr
+                        }
+                    })
+                    .collect();
 
                 all_instructions.append(&mut compiled_body_resolved_breaks);
                 all_instructions.push(Instruction::JumpUnconditional(offset_before_while));
-            },
+            }
             AST::Break => {
                 all_instructions.push(Instruction::UnresolvedBreak);
-            },
+            }
             //_ => panic!("Instruction not covered: {:?}", ast_item)
         }
     }
@@ -178,16 +187,18 @@ mod tests {
 
     #[test]
     fn while_statements() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
-        let tokens = tokenize("
+        let tokens = tokenize(
+            "
 x = 0
 y = 0
 while x < 10:
     y = y + 1
     x = x + 1
-").unwrap();
+",
+        )
+        .unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
         execute_instructions(&interpreter, bytecode);
@@ -196,13 +207,12 @@ while x < 10:
         assert_eq!(*raw_y, 10);
     }
 
-
     #[test]
     fn while_statements_with_conditional_break() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
-        let tokens = tokenize("
+        let tokens = tokenize(
+            "
 x = 0
 y = 0
 while x < 10:
@@ -210,7 +220,9 @@ while x < 10:
     x = x + 1
     if x == 5:
         break
-").unwrap();
+",
+        )
+        .unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
         execute_instructions(&interpreter, bytecode);
@@ -219,20 +231,21 @@ while x < 10:
         assert_eq!(*raw_y, 5);
     }
 
-
     #[test]
     fn if_else_statements() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
-        let tokens = tokenize("
+        let tokens = tokenize(
+            "
 x = 999
 y = 1
 if x == 0:
     y = 2
 else:
     y = 3
-").unwrap();
+",
+        )
+        .unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
         execute_instructions(&interpreter, bytecode);
@@ -357,7 +370,6 @@ else:
 
     #[test]
     fn test_fahrenheit() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64) / (1.0_f64 - (5.0_f64 / 9.0_f64));
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
@@ -371,7 +383,6 @@ else:
 
     #[test]
     fn test_function_calls_with_complex_expr() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64).sin().cos()
             / (1.0_f64.cos() - (5.0_f64 / 9.0_f64)).tanh();
         let interpreter = Interpreter::new();
@@ -387,7 +398,6 @@ else:
 
     #[test]
     fn test_fcall() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let expected_result = 1.0_f64.sin();
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
@@ -401,7 +411,6 @@ else:
 
     #[test]
     fn test_fcall_2params() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let expected_result = 1.0_f64 / 2.0_f64;
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
@@ -415,7 +424,6 @@ else:
 
     #[test]
     fn test_bind_local() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
         let tokens = tokenize("x = 1 + 2").unwrap();
@@ -428,7 +436,6 @@ else:
 
     #[test]
     fn test_string_concat() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
         let tokens = tokenize("\"abc\" + 'cde'").unwrap();
@@ -441,7 +448,6 @@ else:
 
     #[test]
     fn boolean_and() {
-        //(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))
         let interpreter = Interpreter::new();
         register_builtins(&interpreter);
         let tokens = tokenize("True and False").unwrap();
@@ -451,6 +457,4 @@ else:
         let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.top_stack());
         assert_eq!(stack_value, 0);
     }
-
-
 }

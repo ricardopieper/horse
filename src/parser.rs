@@ -35,7 +35,7 @@ pub enum AST {
         expression: Expr,
         body: Vec<AST>,
     },
-    Break
+    Break,
 }
 
 impl Expr {
@@ -159,7 +159,7 @@ impl Parser {
     }
 
     fn cur_offset(&self, offset: isize) -> &Token {
-        return self.cur_offset_opt(offset).unwrap()
+        return self.cur_offset_opt(offset).unwrap();
     }
 
     fn cur_offset_opt(&self, offset: isize) -> Option<&Token> {
@@ -276,16 +276,16 @@ impl Parser {
                 //lets try getting the else statement:
                 self.new_stack();
                 let identation_else = self.skip_whitespace_newline();
-                
+
                 if self.can_go() && identation_else == cur_identation {
-                    if let Token::ElseKeyword = self.cur()  {
+                    if let Token::ElseKeyword = self.cur() {
                         self.next();
                         if let Token::Colon = self.cur() {
                             self.next();
                         } else {
                             panic!("Expected colon after if expr");
                         }
-        
+
                         if let Token::NewLine = self.cur() {
                             self.next();
                         } else {
@@ -295,15 +295,18 @@ impl Parser {
                         self.increment_expected_indent();
                         let ast = self.parse_ast().unwrap();
                         if_statement = match if_statement {
-                            AST::IfStatement{true_branch, elifs, final_else: _} => {
-                                AST::IfStatement{true_branch, elifs, final_else: Some(ast)}
+                            AST::IfStatement {
+                                true_branch,
+                                elifs,
+                                final_else: _,
+                            } => AST::IfStatement {
+                                true_branch,
+                                elifs,
+                                final_else: Some(ast),
                             },
-                            _ => {
-                                panic!("Unrecognized ast on if else parsing")
-                            }
+                            _ => panic!("Unrecognized ast on if else parsing"),
                         };
                         self.decrement_expected_indent();
-
                     } else {
                         self.pop_stack();
                     }
@@ -350,7 +353,6 @@ impl Parser {
             None
         }
     }
-
 
     //returns the identation level until the first non-whitespace token
     //final state of this function is right at newline, before the identations
@@ -479,7 +481,6 @@ impl Parser {
                 }
             }
 
-
             if !parsed_successfully {
                 self.new_stack();
                 let expr = self.parse_expr()?;
@@ -527,7 +528,6 @@ impl Parser {
             //and parse the sub-expression recursively
             {
                 let tok: Token = self.cur().clone();
-                // println!("Called parseExpr, current: {:?}", tok);
                 match tok {
                     Token::Operator(Operator::OpenParen) => {
                         self.new_stack(); //new parsing stack/state
@@ -577,7 +577,6 @@ impl Parser {
                                 //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
                                 //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
                                 //like it's part of an expression, then maybe we should just understand that the expression has been finished.
-                                //println!("OpenParen function");
                                 self.next();
 
                                 if let Token::Operator(Operator::CloseParen) = self.cur() {
@@ -586,13 +585,10 @@ impl Parser {
                                         vec![],
                                     ));
                                 } else {
-                                    //println!("OpenParen -> NewStack");
-
                                     self.new_stack();
                                     let list_of_exprs = self.parse_comma_sep_list_expr();
 
-                                    // //println!("After parsing: ${:?}", list_of_exprs.unwrap().resulting_expr_list);
-
+                                    //
                                     match list_of_exprs {
                                         //try parse stuff
                                         Ok(expressions) => {
@@ -600,8 +596,6 @@ impl Parser {
                                             //commit the result
                                             let popped = self.pop_stack();
                                             let resulting_exprs = expressions.resulting_expr_list;
-
-                                            //println!("Resulting expr in fcall: {:?}, cur_token = {:?}", resulting_exprs, self.cur());
 
                                             self.push_operand(Expr::FunctionCall(
                                                 identifier_str.to_string(),
@@ -625,7 +619,6 @@ impl Parser {
                         was_operand = true;
                     }
                     Token::LiteralInteger(i) => {
-                        //println!("Parsed literal integer {:?}", i);
                         self.push_operand(Expr::IntegerValue(i));
                         was_operand = true;
                     }
@@ -646,7 +639,6 @@ impl Parser {
                         was_operand = true;
                     }
                     Token::Operator(Operator::CloseParen) => {
-                        //println!("Closing expr");
                         not_part_of_expr = true;
                     }
                     Token::Operator(o) => self.push_operator(o),
@@ -656,27 +648,20 @@ impl Parser {
                 }
             }
             if not_part_of_expr {
-                //println!("broke with operands:  {:?}", self.operand_stack());
                 break;
             } else {
                 self.next();
             }
 
-            //-(5.0 / 9.0) * 32
-
             if was_operand {
-                //println!("after parsing operand, cur operands: {:?}", self.operand_stack());
-
                 //base case: there is only an operator and an operand, like "-1"
                 if self.operand_stack().len() == 1 && self.operator_stack().len() == 1 {
-                    //println!("was operand ==1 stack == 1");
                     let last_operand = self.operand_stack_mut().pop().unwrap();
                     let op = self.operator_stack_mut().pop().unwrap();
                     self.push_operand(Expr::UnaryExpression(op, Box::new(last_operand)));
                 }
                 //repeat case: 2 * -----2 or even 2 * -2, consume all the minus signals
                 else if self.operator_stack().len() > 1 && self.operand_stack().len() == 2 {
-                    //println!("was operand == 2 stack > 1");
                     while self.operator_stack().len() > 1 {
                         let last_operand = self.operand_stack_mut().pop().unwrap();
                         let op = self.operator_stack_mut().pop().unwrap();
@@ -690,7 +675,6 @@ impl Parser {
                 let has_pending_operators = !self.operator_stack().is_empty();
 
                 if has_sufficient_operands && has_pending_operators {
-                    //println!("sufficient for binary");
                     let rhs_root = self.operand_stack_mut().pop().unwrap();
                     let lhs_root = self.operand_stack_mut().pop().unwrap();
                     let op = self.operator_stack_mut().pop().unwrap();
@@ -735,12 +719,9 @@ impl Parser {
             }
         }
 
-        //println!("after loop operands:  {:?}", self.operand_stack());
-
         //consume the remaining operators
         if self.operand_stack().len() == 1 {
             while self.operator_stack().len() > 0 {
-                //println!("popping operator and operand");
                 let expr = self.operand_stack_mut().pop().unwrap();
                 let operator = self.operator_stack_mut().pop().unwrap();
                 self.push_operand(Expr::UnaryExpression(operator, Box::new(expr)));
@@ -769,7 +750,6 @@ impl Parser {
         }
         //let remaining_tokens = Vec::from(token_queue);
         let resulting_expr = clean_parens(self.operand_stack_mut().pop().unwrap());
-        //println!("returning expr:  {:?}", resulting_expr);
 
         Ok(ParseExpressionResult {
             resulting_expr: resulting_expr,
@@ -778,15 +758,12 @@ impl Parser {
 
     //expr, expr, ..., expr
     fn parse_comma_sep_list_expr(&mut self) -> Result<ParseListExpressionResult, ParsingError> {
-        //println!("Started parsing comma separated, cur = {:?}", self.cur());
-
         let mut expressions = vec![];
         loop {
             let parse_result = self.parse_expr();
 
             match parse_result {
                 Ok(r) => {
-                    //println!("Parsed comma separated: {:?}", r.resulting_expr);
                     expressions.push(r.resulting_expr);
                 }
                 Err(e) => {
@@ -877,7 +854,8 @@ y = x + str(True)",
 
     #[test]
     fn while_statement() {
-        let tokens = tokenize("
+        let tokens = tokenize(
+            "
 while True:
     x = 1
     break
@@ -885,26 +863,20 @@ while True:
         )
         .unwrap();
 
-        println!("Tokens: {:?}", tokens);
-
         let result = parse_ast(tokens);
-        let expected = vec![
-            AST::WhileStatement {
-                expression: Expr::BooleanValue(true),
-                body: vec![
-                    AST::Assign{
-                        variable_name: String::from("x"), 
-                        expression: Expr::IntegerValue(1)
-                    },
-                    AST::Break
-                ]
-            }
-        ];
+        let expected = vec![AST::WhileStatement {
+            expression: Expr::BooleanValue(true),
+            body: vec![
+                AST::Assign {
+                    variable_name: String::from("x"),
+                    expression: Expr::IntegerValue(1),
+                },
+                AST::Break,
+            ],
+        }];
         assert_eq!(expected, result);
     }
 
-
-    
     #[test]
     fn if_statement_with_print_after_and_newlines_before_and_after() {
         let tokens = tokenize(
@@ -920,8 +892,7 @@ print(x)
         )
         .unwrap();
 
-        println!("Tokens: {:?}", tokens);
-
+        
         let result = parse_ast(tokens);
         let expected = vec![
             AST::IfStatement {
@@ -931,20 +902,21 @@ print(x)
                         Operator::Equals,
                         Box::new(Expr::IntegerValue(0)),
                     ),
-                    statements: vec![
-                        AST::Assign {
-                            variable_name: String::from("x"),
-                            expression: Expr::BinaryOperation(
-                                Box::new(Expr::Variable(String::from("x"))),
-                                Operator::Plus,
-                                Box::new(Expr::IntegerValue(1)),
-                            ),
-                        }
-                    ],
+                    statements: vec![AST::Assign {
+                        variable_name: String::from("x"),
+                        expression: Expr::BinaryOperation(
+                            Box::new(Expr::Variable(String::from("x"))),
+                            Operator::Plus,
+                            Box::new(Expr::IntegerValue(1)),
+                        ),
+                    }],
                 },
                 elifs: vec![],
                 final_else: Some(vec![
-                    AST::Assign{ variable_name: String::from("x"), expression: Expr::IntegerValue(999)},
+                    AST::Assign {
+                        variable_name: String::from("x"),
+                        expression: Expr::IntegerValue(999),
+                    },
                     AST::IfStatement {
                         true_branch: ASTIfStatement {
                             expression: Expr::BinaryOperation(
@@ -995,8 +967,7 @@ print(x)
 
         let tokens = tokenize(source_replaced.as_str()).unwrap();
 
-        println!("Tokens: {:?}", tokens);
-
+        
         let result = parse_ast(tokens);
         let expected = vec![
             AST::IfStatement {
@@ -1888,7 +1859,6 @@ print(y)",
 
     #[test]
     fn fahrenheit_1_expr() {
-        //-(5.0 / 9.0) * 32
         let tokens = tokenize("-(5.0 / 9.0) * 32").unwrap();
         let result = parse(tokens);
 
@@ -1910,7 +1880,6 @@ print(y)",
 
     #[test]
     fn fahrenheit_expr() {
-        //(-(5.0 / 9.0) * 32)    /    (1 - (5.0 / 9.0))
         let tokens = tokenize("(-(5.0 / 9.0) * 32) / (1 - (5.0 / 9.0))").unwrap();
         let result = parse(tokens);
 
