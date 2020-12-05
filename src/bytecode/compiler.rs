@@ -16,6 +16,7 @@ fn compile_expr(expr: Expr) -> Vec<Instruction> {
                 Operator::Or => vec![Instruction::LoadMethod(String::from("__or__"))],
                 Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
                 Operator::Plus => vec![Instruction::LoadMethod(String::from("__add__"))],
+                Operator::Mod => vec![Instruction::LoadMethod(String::from("__mod__"))],
                 Operator::Minus => vec![Instruction::LoadMethod(String::from("__sub__"))],
                 Operator::Multiply => vec![Instruction::LoadMethod(String::from("__mul__"))],
                 Operator::Divide => vec![Instruction::LoadMethod(String::from("__truediv__"))],
@@ -155,7 +156,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize) -> Vec<Instruction> {
                 let offset_after_body = offset_after_expr + compiled_body.len() + 1;
                 all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_body));
 
-                let mut compiled_body_resolved_breaks: Vec<Instruction> = compiled_body
+                let mut compiled_body_with_resolved_breaks: Vec<Instruction> = compiled_body
                     .into_iter()
                     .map(|instr| -> Instruction {
                         if let Instruction::UnresolvedBreak = instr {
@@ -166,10 +167,18 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize) -> Vec<Instruction> {
                     })
                     .collect();
 
-                all_instructions.append(&mut compiled_body_resolved_breaks);
+                all_instructions.append(&mut compiled_body_with_resolved_breaks);
                 all_instructions.push(Instruction::JumpUnconditional(offset_before_while));
             }
             AST::Break => {
+                //In python there's something called a "block stack" and an opcode called POP_BLOCK
+                //that makes this much easier, as well as a BREAK_LOOP instruction that uses block information
+                //to break the current loop.
+                //So Python really has a loooot of information about high-level language features even in the 
+                //lower level layers...
+                //But for me it's a more interesting problem to not use these instructions and just use plain jumps. 
+                //However, when I find a break in the AST, I don't yet know what the bytecode will look like,
+                //and therefore I don't know where to jump. 
                 all_instructions.push(Instruction::UnresolvedBreak);
             }
             //_ => panic!("Instruction not covered: {:?}", ast_item)

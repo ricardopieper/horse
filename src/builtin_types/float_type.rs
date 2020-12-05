@@ -170,6 +170,7 @@ macro_rules! add_comparable {
 pub fn register_float_type(interpreter: &Interpreter) -> MemoryAddress {
     let mut methods = HashMap::new();
     add_fn!(interpreter, methods, "__add__", |a, b| a + b);
+    add_fn!(interpreter, methods, "__mod__", |a, b| a % b);
     add_fn!(interpreter, methods, "__sub__", |a, b| a - b);
     add_fn!(interpreter, methods, "__mul__", |a, b| a * b);
     add_fn!(interpreter, methods, "__truediv__", |a, b| a / b);

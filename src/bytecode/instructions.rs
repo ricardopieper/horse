@@ -32,13 +32,23 @@ pub fn handle_method_call(interpreter: &Interpreter, number_args: usize) {
     let function_addr = interpreter.pop_stack();
     let bounded_obj_addr = interpreter.pop_stack();
 
+    interpreter.increase_refcount(bounded_obj_addr);
+    for addr in temp_stack.iter() {
+        interpreter.increase_refcount(*addr);
+    }
+
     interpreter.new_stack_frame();
 
     let new_obj =
-        interpreter.bounded_function_call_byaddr(bounded_obj_addr, function_addr, temp_stack);
+        interpreter.bounded_function_call_byaddr(bounded_obj_addr, function_addr, &temp_stack);
+
+    interpreter.decrease_refcount(bounded_obj_addr);
+    for addr in temp_stack.iter() {
+        interpreter.decrease_refcount(*addr);
+    }
 
     interpreter.pop_stack_frame();
-    interpreter.push_stack(new_obj);
+    interpreter.push_onto_stack(new_obj);
 }
 
 pub fn handle_function_call(interpreter: &Interpreter, number_args: usize) {
@@ -50,12 +60,20 @@ pub fn handle_function_call(interpreter: &Interpreter, number_args: usize) {
 
     let function_addr = interpreter.pop_stack();
 
+    for addr in temp_stack.iter() {
+        interpreter.increase_refcount(*addr);
+    }
+
     interpreter.new_stack_frame();
 
-    let new_obj = interpreter.unbounded_function_call_byaddr(function_addr, temp_stack);
+    let new_obj = interpreter.unbounded_function_call_byaddr(function_addr, &temp_stack);
+
+    for addr in temp_stack.iter() {
+        interpreter.decrease_refcount(*addr);
+    }
 
     interpreter.pop_stack_frame();
-    interpreter.push_stack(new_obj);
+    interpreter.push_onto_stack(new_obj);
 }
 
 pub fn handle_load_const(interpreter: &Interpreter, const_data: &Const) {
@@ -69,13 +87,13 @@ pub fn handle_load_const(interpreter: &Interpreter, const_data: &Const) {
         }
     };
 
-    interpreter.push_stack(loaded_addr);
+    interpreter.push_onto_stack(loaded_addr);
 }
 
 pub fn handle_load_method(interpreter: &Interpreter, method_name: &str) {
     let stack_top = interpreter.pop_stack();
     let pyobj = interpreter.get_pyobj_byaddr(stack_top).unwrap();
-    interpreter.push_stack(stack_top);
+    interpreter.push_onto_stack(stack_top);
 
     let type_addr = pyobj.type_addr;
     let obj = interpreter.get_type_method_addr_byname(type_addr, method_name);
@@ -83,7 +101,7 @@ pub fn handle_load_method(interpreter: &Interpreter, method_name: &str) {
     match obj {
         None => panic!("type has no method {}", method_name),
         Some(addr) => {
-            interpreter.push_stack(addr);
+            interpreter.push_onto_stack(addr);
         }
     }
 }
@@ -96,7 +114,7 @@ pub fn handle_load_function(interpreter: &Interpreter, method_name: &str) {
         Some(addr) => {
             let pyobj = interpreter.get_pyobj_byaddr(addr).unwrap();
             match &pyobj.structure {
-                PyObjectStructure::Callable { code: _, name: _ } => interpreter.push_stack(addr),
+                PyObjectStructure::Callable { code: _, name: _ } => interpreter.push_onto_stack(addr),
                 PyObjectStructure::Type {
                     name: _,
                     bounded_functions: _,
@@ -106,7 +124,7 @@ pub fn handle_load_function(interpreter: &Interpreter, method_name: &str) {
                     let new = functions
                         .get("__new__")
                         .expect("Type has no __new__ function");
-                    interpreter.push_stack(*new);
+                    interpreter.push_onto_stack(*new);
                 }
                 _ => panic!("not callable: {}", method_name),
             }
@@ -120,13 +138,17 @@ pub fn handle_load_name(interpreter: &Interpreter, name: &str) {
     match obj {
         None => panic!("No local with name {}", name),
         Some(addr) => {
-            interpreter.push_stack(addr);
+            interpreter.push_onto_stack(addr);
         }
     }
 }
 
 pub fn handle_store_name(interpreter: &Interpreter, name: &str) {
-    let addr = interpreter.top_stack();
+    if let Some(addr) = interpreter.get_local(name) {
+        interpreter.decrease_refcount(addr);
+    }
+    let addr = interpreter.pop_stack();
+    interpreter.increase_refcount(addr);
     interpreter.bind_local(name, addr)
 }
 
@@ -135,12 +157,16 @@ pub fn handle_jump_if_false_pop(interpreter: &Interpreter, destination: usize) -
     let stack_top = interpreter.pop_stack();
     let as_boolean = interpreter.call_method(stack_top, "__bool__", vec![]).unwrap();
     let raw_value: i128 = *interpreter.get_raw_data_of_pyobj::<i128>(as_boolean);
-    if raw_value == 0 {
+    let result = if raw_value == 0 {
         interpreter.set_pc(destination);
-        return true;
+        true
     } else {
-        return false;
-    }
+        false
+    };
+
+    interpreter.decrease_refcount(as_boolean);
+
+    return result;
 }
 
 pub fn handle_jump_unconditional(interpreter: &Interpreter, destination: usize) {
@@ -149,7 +175,7 @@ pub fn handle_jump_unconditional(interpreter: &Interpreter, destination: usize) 
 
 
 pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruction>) {
-   #[cfg(test)]
+    #[cfg(test)]
     {
         println!("Executing instructions");
         for (index, inst) in instructions.iter().enumerate() {
@@ -188,5 +214,8 @@ pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruc
         if advance_pc {
             interpreter.jump_pc(1);
         }
+       // let statistics = interpreter.memory.get_statistics();
+       // let stacksize = interpreter.stack.borrow().len();
+       // println!("stacktrace = {} allocated = {}, inuse = {}", stacksize, statistics.allocated_slots, statistics.slots_in_use);
     }
 }

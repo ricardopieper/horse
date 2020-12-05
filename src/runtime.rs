@@ -18,6 +18,7 @@ pub enum PyObjectStructure {
     NotImplemented,
     Object {
         raw_data: MemoryAddress,
+        refcount: usize
     },
     Callable {
         code: MemoryAddress,
@@ -59,13 +60,21 @@ pub struct MemoryCell {
 
 pub struct Memory {
     pub memory: RefCell<Vec<MemoryCell>>,
+    //gc graph stores: Key = memory addresses, Values = Other adresses that point to that memory addr
+    //Every memory address has an entry here
+    pub gc_graph: HashMap<MemoryAddress, Vec<MemoryAddress>>,
     pub recently_deallocated_indexes: RefCell<Vec<MemoryAddress>>,
 }
 
 pub struct UninitializedMemory {}
 
+pub struct MemoryStatistics {
+    pub allocated_slots: usize,
+    pub slots_in_use: usize
+}
+
 impl Memory {
-    pub fn get<'a>(&'a self, address: MemoryAddress) -> &mut Box<dyn Any> {
+    pub fn get(&self, address: MemoryAddress) -> &mut Box<dyn Any> {
         {
             if address > self.memory.borrow().len() - 1 {
                 panic!(
@@ -83,7 +92,7 @@ impl Memory {
         }
     }
 
-    pub fn write<'a>(&'a self, address: MemoryAddress, data: Box<dyn Any>) {
+    pub fn write(&self, address: MemoryAddress, data: Box<dyn Any>) {
         {
             if address > self.memory.borrow().len() - 1 {
                 panic!(
@@ -101,28 +110,27 @@ impl Memory {
         }
     }
 
-    pub fn deallocate<'a>(&'a self, address: MemoryAddress) {
-        {
-            if address > self.memory.borrow().len() - 1 {
-                panic!(
-                    "Attempt to deallocate non-existent memory at address {}",
-                    address
-                );
-            }
+    pub fn deallocate(&self, address: MemoryAddress) {
+        
+        if address > self.memory.borrow().len() - 1 {
+            panic!(
+                "Attempt to deallocate non-existent memory at address {}",
+                address
+            );
         }
-        {
-            let cell = &mut self.memory.borrow_mut()[address];
-            if cell.valid {
-                cell.data = UnsafeCell::new(Box::new(UninitializedMemory {}));
-                cell.valid = false;
-            } else {
-                panic!("Attempt to dealloate already invalid memory at address in non-valid memory address {}", address)
-            }
+        
+        let cell = &mut self.memory.borrow_mut()[address];
+        if cell.valid {
+            cell.data = UnsafeCell::new(Box::new(UninitializedMemory {}));
+            cell.valid = false;
+        } else {
+            panic!("Attempt to dealloate already invalid memory at address in non-valid memory address {}", address)
         }
+        
         self.recently_deallocated_indexes.borrow_mut().push(address);
     }
 
-    pub fn allocate<'a>(&'a self) -> MemoryAddress {
+    pub fn allocate(&self) -> MemoryAddress {
         let dealloc: Option<MemoryAddress>;
 
         {
@@ -154,10 +162,19 @@ impl Memory {
         };
     }
 
-    pub fn allocate_and_write<'a>(&'a self, data: Box<dyn Any>) -> MemoryAddress {
+    pub fn allocate_and_write(&self, data: Box<dyn Any>) -> MemoryAddress {
         let address = self.allocate();
         self.write(address, data);
         return address;
+    }
+
+    pub fn get_statistics(&self) -> MemoryStatistics {
+        let mem = self.memory.borrow();
+        let allocated_slots = mem.len();
+        let slots_in_use = mem.iter().filter(|x| x.valid).count();
+        MemoryStatistics {
+            allocated_slots, slots_in_use
+        }
     }
 }
 
@@ -194,6 +211,7 @@ impl Interpreter {
                 stack: vec![]
             }]),
             memory: Memory {
+                gc_graph: HashMap::new(),
                 memory: RefCell::new(vec![]),
                 recently_deallocated_indexes: RefCell::new(vec![]),
             },
@@ -275,7 +293,7 @@ impl Interpreter {
             structure: PyObjectStructure::Module {
                 name: BUILTIN_MODULE.to_string(),
                 objects: HashMap::new()
-            }
+            },
         }));
 
         interpreter.special_values.type_type = type_type;
@@ -398,6 +416,24 @@ impl Interpreter {
         return self.memory.get(addr).downcast_mut::<PyObject>();
     }
 
+    pub fn increase_refcount(&self, addr: MemoryAddress) {
+        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+        if let PyObjectStructure::Object {raw_data: _, refcount} = &mut pyobj.structure {
+            *refcount = *refcount + 1;
+        }
+    }
+
+    pub fn decrease_refcount(&self, addr: MemoryAddress) {
+        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+        if let PyObjectStructure::Object {raw_data, refcount} = &mut pyobj.structure {
+            *refcount = *refcount - 1;
+            if *refcount <= 1 {
+                self.memory.deallocate(addr);
+                self.memory.deallocate(*raw_data);
+            }
+        }
+    }
+
     pub fn get_rawdata_byaddr(&self, addr: MemoryAddress) -> &mut Box<dyn Any> {
         return self.memory.get(addr);
     }
@@ -510,6 +546,7 @@ impl Interpreter {
             type_addr,
             PyObjectStructure::Object {
                 raw_data: raw_data_ptr,
+                refcount: 1
             },
         );
     }
@@ -537,6 +574,7 @@ impl Interpreter {
         let pyobj = self.get_pyobj_byaddr(addr).unwrap();
         if let PyObjectStructure::Object {
             raw_data,
+            refcount: _
         } = &pyobj.structure
         {
             let rawdata = self.get_rawdata_byaddr(*raw_data);
@@ -583,7 +621,7 @@ impl Interpreter {
         &self,
         bound_obj_addr: MemoryAddress,
         method_addr: MemoryAddress,
-        params: Vec<MemoryAddress>,
+        params: &Vec<MemoryAddress>,
     ) -> MemoryAddress {
         let pyobj: &PyObject = self.get_pyobj_byaddr(bound_obj_addr).unwrap();
         let type_addr = pyobj.type_addr;
@@ -609,7 +647,7 @@ impl Interpreter {
                                 Some(fname) => Some(fname.to_string()),
                                 None => None
                             },
-                            params: params,
+                            params: params.clone(),
                         };
         
                         return self.callable_call(method_addr, call_params);
@@ -633,7 +671,7 @@ impl Interpreter {
     pub fn unbounded_function_call_byaddr(
         &self,
         function_addr: MemoryAddress,
-        params: Vec<MemoryAddress>,
+        params: &Vec<MemoryAddress>,
     ) -> MemoryAddress {
         let unbounded_func = self.get_pyobj_byaddr(function_addr);
         if let Some(unbounded_func_pyobj) = unbounded_func {
@@ -646,7 +684,7 @@ impl Interpreter {
                             Some(fname) => Some(fname.to_string()),
                             None => None
                         },
-                        params: params,
+                        params: params.clone(),
                     };
 
                     self.callable_call(function_addr, call_params)
@@ -685,14 +723,19 @@ impl Interpreter {
     }
 
 
-    pub fn push_stack(&self, value: MemoryAddress) {
+    pub fn push_onto_stack(&self, value: MemoryAddress) {
         self.stack.borrow_mut().last_mut().unwrap().stack.push(value)
     }
 
     pub fn pop_stack_frame(&self) -> StackFrame {
         let mut current_stack = self.stack.borrow_mut();
         match current_stack.pop() {
-            Some(stack_frame) => stack_frame,
+            Some(stack_frame) => {
+                for addr in stack_frame.stack.iter() {
+                    self.decrease_refcount(*addr)
+                }
+                stack_frame
+            },
             None => panic!("Attempt to pop on empty stack frames!")
         }
     }

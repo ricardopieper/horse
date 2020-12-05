@@ -6,6 +6,7 @@ pub enum Operator {
     Minus,
     Multiply,
     Divide,
+    Mod,
     BitShiftLeft,
     BitShiftRight,
     Not,
@@ -115,6 +116,7 @@ impl PartialToken {
                 "+" => Token::Operator(Operator::Plus),
                 "-" => Token::Operator(Operator::Minus),
                 "*" => Token::Operator(Operator::Multiply),
+                "%" => Token::Operator(Operator::Mod),
                 "/" => Token::Operator(Operator::Divide),
                 "^" => Token::Operator(Operator::Xor),
                 "<<" => Token::Operator(Operator::BitShiftLeft),
@@ -302,7 +304,7 @@ impl Tokenizer {
 
     pub fn tokenize(mut self) -> Result<Vec<Token>, String> {
         let operators = &[
-            "+", "-", "*", "/", "<<", ">>", "<=", ">=", ">", "<", "!=", "==", "=", "^", "(", ")",
+            "+", "-", "*", "%", "/", "<<", ">>", "<=", ">=", ">", "<", "!=", "==", "=", "^", "(", ")",
         ];
         while self.can_go() {
             self.commit_current_token();
@@ -333,7 +335,7 @@ impl Tokenizer {
             }
             else if self.index > 0 && self.cur_offset(-1) == '\n' && self.cur() == ' ' {
                 let mut current_spaces = 0; 
-                while self.cur() == ' ' {
+                while self.can_go() && self.cur() == ' ' {
                     current_spaces = current_spaces + 1;
                     self.next();
                 }

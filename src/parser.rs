@@ -878,6 +878,47 @@ while True:
     }
 
     #[test]
+    fn while_statement_with_if_and_expr() {
+        let tokens = tokenize(
+            "while x < 1000000:
+    if x / 5 == 0:
+        break
+        
+",
+        )
+        .unwrap();
+
+        let result = parse_ast(tokens);
+        let expected = vec![AST::WhileStatement {
+            expression: Expr::BinaryOperation(
+                Box::new(Expr::Variable("x".to_string())),
+                Operator::Less,
+                Box::new(Expr::IntegerValue(1000000))
+            ),
+            body: vec![
+                AST::IfStatement {
+                    true_branch: ASTIfStatement {
+                        expression: Expr::BinaryOperation(
+                            Box::new(Expr::BinaryOperation(
+                                Box::new(Expr::Variable("x".to_string())),
+                                Operator::Divide,
+                                Box::new(Expr::IntegerValue(5))
+                            )),
+                            Operator::Equals,
+                            Box::new(Expr::IntegerValue(0))
+                        ),
+                        statements: vec![AST::Break]
+                    },
+                    elifs: vec![],
+                    final_else: None
+                }
+            ],
+        }];
+        assert_eq!(expected, result);
+    }
+
+
+    #[test]
     fn if_statement_with_print_after_and_newlines_before_and_after() {
         let tokens = tokenize(
             "

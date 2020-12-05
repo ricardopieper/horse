@@ -20,6 +20,29 @@ fn main() {
         let ast = parser::parse_ast(tokens.unwrap());
         let bytecode = bytecode::compiler::compile(ast);
         bytecode::instructions::execute_instructions(&interpreter, bytecode);
+
+        /*
+        let memory = interpreter.memory.memory.into_inner();
+        for (index, data) in memory.into_iter().enumerate() {
+            let cell = data.data.into_inner();
+
+            if let Some(integer) = cell.downcast_ref::<i128>() {
+                println!("Data at index {} is a raw int {:?}", index, integer);
+            }
+            else if let Some(float) = cell.downcast_ref::<f64>() {
+                println!("Data at index {} is a raw float {:?}", index, float);
+            }
+            else if let Some(boolean) = cell.downcast_ref::<bool>() {
+                println!("Data at index {} is a raw bool {:?}", index, boolean);
+            }
+            else if let Some(py_obj) = cell.downcast_ref::<runtime::PyObject>() {
+                println!("Data at index {} is a PyObject {:?}", index, py_obj);
+            }
+            else {
+                println!("Data at index {} is unknown, might be a function lambda", index);
+            }
+        }*/
+
         return;
     }
 
