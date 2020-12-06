@@ -82,8 +82,11 @@ pub fn handle_load_const(interpreter: &Interpreter, const_data: &Const) {
         Const::Float(f) => interpreter.allocate_type_byname_raw("float", Box::new(*f)),
         Const::String(s) => interpreter.allocate_type_byname_raw("str", Box::new(s.clone())),
         Const::Boolean(b) => {
-            let i = if *b { 1 as i128 } else { 0 as i128 };
-            interpreter.allocate_type_byname_raw("bool", Box::new(i))
+            if *b {
+                interpreter.special_values[&SpecialValue::TrueValue]
+            } else {
+                interpreter.special_values[&SpecialValue::FalseValue]
+            }
         }
     };
 
@@ -214,8 +217,5 @@ pub fn execute_instructions(interpreter: &Interpreter, instructions: Vec<Instruc
         if advance_pc {
             interpreter.jump_pc(1);
         }
-       // let statistics = interpreter.memory.get_statistics();
-       // let stacksize = interpreter.stack.borrow().len();
-       // println!("stacktrace = {} allocated = {}, inuse = {}", stacksize, statistics.allocated_slots, statistics.slots_in_use);
     }
 }

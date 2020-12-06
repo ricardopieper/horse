@@ -7,7 +7,7 @@ pub mod string_type;
 pub mod builtin_math;
 pub mod builtin_io;
 
-pub fn register_builtins(interpreter: &Interpreter) {
+pub fn register_builtins(interpreter: &mut Interpreter) {
     int_type::register_int_type(interpreter);
     float_type::register_float_type(interpreter);
     builtin_math::register_builtin_functions(interpreter);

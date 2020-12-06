@@ -1,5 +1,6 @@
 mod lexer;
 mod parser;
+#[macro_use]
 mod runtime;
 mod builtin_types;
 mod bytecode;
@@ -9,8 +10,8 @@ use std::env;
 use std::fs;
 
 fn main() {
-    let interpreter = runtime::Interpreter::new();
-    builtin_types::register_builtins(&interpreter);
+    let mut interpreter = runtime::Interpreter::new();
+    builtin_types::register_builtins(&mut interpreter);
     
     let args: Vec<String> = env::args().collect();
 

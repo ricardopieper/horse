@@ -196,8 +196,8 @@ mod tests {
 
     #[test]
     fn while_statements() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize(
             "
 x = 0
@@ -218,8 +218,8 @@ while x < 10:
 
     #[test]
     fn while_statements_with_conditional_break() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize(
             "
 x = 0
@@ -242,8 +242,8 @@ while x < 10:
 
     #[test]
     fn if_else_statements() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize(
             "
 x = 999
@@ -265,8 +265,8 @@ else:
 
     #[test]
     fn test_literal_int_1() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("1").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -277,8 +277,8 @@ else:
 
     #[test]
     fn test_literal_float_1() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("1.0").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -289,8 +289,8 @@ else:
 
     #[test]
     fn test_literal_boolean_true() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("True").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -301,8 +301,8 @@ else:
 
     #[test]
     fn test_literal_boolean_false() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("False").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -313,8 +313,8 @@ else:
 
     #[test]
     fn test_1_plus_1() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("1 + 1").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -325,8 +325,8 @@ else:
 
     #[test]
     fn test_1_times_float_3_5() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("1 + 3.5").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -339,8 +339,8 @@ else:
     fn test_neg() {
         //-(5.0 / 9.0)
         let expected_result = -(5.0_f64 / 9.0_f64);
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("-(5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -353,8 +353,8 @@ else:
     fn test_div_neg_mul() {
         //-(5.0 / 9.0) * 32)
         let expected_result = -(5.0_f64 / 9.0_f64) * 32.0_f64;
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("-(5.0 / 9.0) * 32.0").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -367,8 +367,8 @@ else:
     fn test_div_minus_div() {
         //(1 - (5.0 / 9.0))
         let expected_result = 1.0_f64 - (5.0_f64 / 9.0_f64);
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("1.0 - (5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -380,8 +380,8 @@ else:
     #[test]
     fn test_fahrenheit() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64) / (1.0_f64 - (5.0_f64 / 9.0_f64));
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("(-(5.0 / 9.0) * 32.0) / (1.0 - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -394,8 +394,8 @@ else:
     fn test_function_calls_with_complex_expr() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64).sin().cos()
             / (1.0_f64.cos() - (5.0_f64 / 9.0_f64)).tanh();
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens =
             tokenize("cos(sin(-(5.0 / 9.0) * 32.0)) / tanh(cos(1.0) - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
@@ -408,8 +408,8 @@ else:
     #[test]
     fn test_fcall() {
         let expected_result = 1.0_f64.sin();
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("sin(1.0)").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -421,8 +421,8 @@ else:
     #[test]
     fn test_fcall_2params() {
         let expected_result = 1.0_f64 / 2.0_f64;
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("test(1.0, 2.0)").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -433,20 +433,20 @@ else:
 
     #[test]
     fn test_bind_local() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("x = 1 + 2").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
         execute_instructions(&interpreter, bytecode);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.top_stack());
+        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.get_local("x").unwrap());
         assert_eq!(stack_value, 3);
     }
 
     #[test]
     fn test_string_concat() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("\"abc\" + 'cde'").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);
@@ -457,8 +457,8 @@ else:
 
     #[test]
     fn boolean_and() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let tokens = tokenize("True and False").unwrap();
         let expr = parse_ast(tokens);
         let bytecode = compile(expr);

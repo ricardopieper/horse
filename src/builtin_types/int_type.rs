@@ -1,81 +1,47 @@
 use crate::runtime::*;
-use std::collections::HashMap;
 
-
-fn create_compare_fn<FInt, FFloat>(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>,
-    name: &str,
-    op_int: FInt, op_float: FFloat) where FInt: Fn(i128, i128) -> bool + 'static ,  FFloat: Fn(f64, f64) -> bool + 'static {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-        
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 1, params.params.len());
-            
+macro_rules! create_compare_function {
+    ($name:tt, $param_a:tt, $param_b:tt, $compare:expr) => {
+        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+            check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
+                    
             let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
             let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
             
             return match other_type_name {
-               "bool" | "int" => {
+            "bool" | "int" => {
                     let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
-                    let result_compare = (op_int)(*self_data, *other_int);
-                    let result_as_int: i128 = if result_compare {1} else {0};
-                    interpreter.allocate_type_byname_raw("bool", Box::new(result_as_int))
+                    let $param_a = self_data;
+                    let $param_b = other_int;
+                    if $compare {
+                        return interpreter.special_values[&SpecialValue::TrueValue];
+                    } else {
+                        return interpreter.special_values[&SpecialValue::FalseValue];
+                    }
                 },
                 "float" => {
                     let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
-                    let result_compare = (op_float)(*self_data as f64, *other_float as f64);
-                    let result_as_int: i128 = if result_compare {1} else {0};
-                    interpreter.allocate_type_byname_raw("bool", Box::new(result_as_int))
+                    let $param_a = *self_data as f64;
+                    let $param_b = *other_float;
+                    if $compare {
+                        return interpreter.special_values[&SpecialValue::TrueValue];
+                    } else {
+                        return interpreter.special_values[&SpecialValue::FalseValue];
+                    }
                 },
                 _ => {
-                    interpreter.special_values.not_implemented_value
+                    interpreter.special_values[&SpecialValue::NotImplementedValue]
                 }
             };
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some(name.to_string()));
-
-    methods.insert(name.to_string(), func_addr);
+        }
+    }
 }
 
-
-fn create_binop_fn<FInt, FFloat>(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>,
-    name: &str,
-    op_int: FInt, op_float: FFloat) where FInt: Fn(i128, i128) -> i128 + 'static ,  FFloat: Fn(f64, f64) -> f64 + 'static {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
+macro_rules! create_binop_function {
+    ($name:tt, $param_a:tt, $param_b:tt, $binop:expr) => {
+        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
         
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 1, params.params.len());
-            
-            let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
-            let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            
-            return match other_type_name {
-                "int" => {
-                    let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
-                    interpreter.allocate_type_byname_raw("int", Box::new((op_int)( *self_data, *other_int)))
-                },
-                "float" => {
-                    let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
-                    interpreter.allocate_type_byname_raw("float", Box::new((op_float)(*self_data as f64, *other_float)))
-                },
-                _ => {
-                    interpreter.special_values.not_implemented_value
-                }
-            };
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some(name.to_string()));
-
-    methods.insert(name.to_string(), func_addr);
-}
-
-
-fn create_div(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>,
-    name: &str) {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-        
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 1, params.params.len());
+            check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
             
             let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
             let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
@@ -83,148 +49,131 @@ fn create_div(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAd
             return match other_type_name {
                 "int" => {
                     let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
-                    interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_int as f64))
+                    let $param_a = self_data;
+                    let $param_b = other_int;
+                    interpreter.allocate_type_byname_raw("int", Box::new($binop))
                 },
                 "float" => {
                     let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
-                    interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_float))
+                    let $param_a = *self_data as f64;
+                    let $param_b = *other_float;
+                    interpreter.allocate_type_byname_raw("float", Box::new($binop))
                 },
                 _ => {
-                    interpreter.special_values.not_implemented_value
+                    interpreter.special_values[&SpecialValue::NotImplementedValue]
                 }
             };
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some(name.to_string()));
-
-    methods.insert(name.to_string(), func_addr);
+        }
+    }
 }
 
-fn create_unary_fn<FInt>(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>,
-    name: &str,
-    op_int: FInt) where FInt: Fn(i128) -> i128 + 'static {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
+macro_rules! create_unary_function {
+    ($name:tt, $param_a:tt, $func:expr) => {
+        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+            check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
             let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            interpreter.allocate_type_byname_raw("int", Box::new((op_int)(*self_data)))            
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some(name.to_string()));
-
-    methods.insert(name.to_string(), func_addr);
+            let $param_a = *self_data;
+            interpreter.allocate_type_byname_raw("int", Box::new($func))            
+        }
+    }
 }
 
+create_compare_function!(greater_than, a, b, a > b);
+create_compare_function!(less_than, a, b, a < b);
+create_compare_function!(equals, a, b, a == b);
+create_compare_function!(less_equals, a, b, a <= b);
+create_compare_function!(greater_equals, a, b, a <= b);
+create_compare_function!(not_equals, a, b, a != b);
 
-fn create_to_int(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
-    let func = PyCallable {
-        code: Box::new(move |_interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
-            return params.bound_pyobj.unwrap();
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some("__int__".to_string()));
-    methods.insert("__int__".to_string(), func_addr);
-}
+create_binop_function!(add, a, b, a + b);
+create_binop_function!(modulus, a, b, a % b);
+create_binop_function!(sub, a, b, a - b);
+create_binop_function!(mul, a, b, a * b);
 
-
-fn create_to_float(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
-            let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            interpreter.allocate_type_byname_raw("float", Box::new(self_data as f64))
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some("__float__".to_string()));
-    methods.insert("__float__".to_string(), func_addr);
-}
-
-
-fn create_to_str(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
-            let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some("__str__".to_string()));
-    methods.insert("__str__".to_string(), func_addr);
-}
-
-
-fn create_repr(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
-            let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some("__repr__".to_string()));
-    methods.insert("__repr__".to_string(), func_addr);
-}
-
-
-
-fn create_to_boolean(interpreter: & Interpreter, methods: &mut HashMap<String, MemoryAddress>) {
-    let func = PyCallable {
-        code: Box::new(move |interpreter, params| -> MemoryAddress {
-            check_builtin_func_params(params.func_name.unwrap().as_str(), 0, params.params.len());
-            let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-            if *self_data == 0 {
-                interpreter.allocate_type_byname_raw("bool", Box::new(0))
-            } else {
-                interpreter.allocate_type_byname_raw("bool", Box::new(1))
-            }
-        })
-    };
-    let func_addr = interpreter.create_callable_pyobj(func, Some("__bool__".to_string()));
-    methods.insert("__bool__".to_string(), func_addr);
-}
-
-
-macro_rules! add_fn {
-    ($interpreter:expr, $methods:expr, $name:expr, $binfunc:expr) => {
-        create_binop_fn($interpreter, &mut $methods, $name, $binfunc, $binfunc)
+fn truediv(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
+            
+    let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
+    let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    
+    return match other_type_name {
+        "int" => {
+            let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
+            interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_int as f64))
+        },
+        "float" => {
+            let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
+            interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_float))
+        },
+        _ => {
+            interpreter.special_values[&SpecialValue::NotImplementedValue]
+        }
     };
 }
 
+create_unary_function!(negation, a, a * -1);
+create_unary_function!(positive, a, a);
 
-macro_rules! add_comparable {
-    ($interpreter:expr, $methods:expr, $name:expr, $binfunc:expr) => {
-        create_compare_fn($interpreter, &mut $methods, $name, $binfunc, $binfunc)
-    };
+fn int(_interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
+    //no-op
+    return params.bound_pyobj.unwrap();
 }
+
+fn float(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
+    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    interpreter.allocate_type_byname_raw("float", Box::new(self_data as f64))
+}
+
+
+fn to_str(interpreter: & Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
+    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
+}
+
+fn repr(interpreter: & Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
+    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
+}
+
+fn to_boolean(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
+    let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    if *self_data == 1 {
+        return interpreter.special_values[&SpecialValue::TrueValue];
+    } else {
+        return interpreter.special_values[&SpecialValue::FalseValue];
+    }
+}
+
 
 pub fn register_int_type(interpreter: &Interpreter) -> MemoryAddress {
-    let mut methods = HashMap::new();
-    add_fn!(interpreter, methods, "__add__", |a, b| a + b);
-    add_fn!(interpreter, methods, "__mod__", |a, b| a % b);
-    add_fn!(interpreter, methods, "__sub__", |a, b| a - b);
-    add_fn!(interpreter, methods, "__mul__", |a, b| a * b);
-    add_fn!(interpreter, methods, "__truediv__", |a, b| a / b);
+    let int_type = interpreter.create_type(BUILTIN_MODULE, "int", None);
     
-    create_div(interpreter, &mut methods, "__truediv__");
-    
-    create_to_boolean(interpreter, &mut methods);
-    create_to_int(interpreter, &mut methods);
-    create_to_float(interpreter, &mut methods);
-    create_to_str(interpreter, &mut methods);
-    create_repr(interpreter, &mut methods);
-    
-    create_unary_fn(interpreter, &mut methods, "__neg__", |a| a * -1);
-    create_unary_fn(interpreter, &mut methods, "__pos__", |a| a);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__eq__", equals);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__gt__", greater_than);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__ge__", greater_equals);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__lt__", less_than);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__le__", less_equals);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__ne__", not_equals);
 
-    add_comparable!(interpreter, methods, "__eq__", |a, b| a == b);
-    add_comparable!(interpreter, methods, "__gt__", |a, b| a > b);
-    add_comparable!(interpreter, methods, "__ge__", |a, b| a >= b);
-    add_comparable!(interpreter, methods, "__lt__", |a, b| a < b);
-    add_comparable!(interpreter, methods, "__le__", |a, b| a <= b);
-    add_comparable!(interpreter, methods, "__ne__", |a, b| a != b);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__add__", add);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__mod__", modulus);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__sub__", sub);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__mul__", mul);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__truediv__", truediv);
 
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__neg__", negation);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__pos__", positive);
+
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__bool__", to_boolean);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__int__", int);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__float__", float);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__str__", to_str);
+    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__repr__", repr);
    
-    return interpreter.create_type(BUILTIN_MODULE, "int", methods, HashMap::new(), None);
+    return int_type;
 }
-

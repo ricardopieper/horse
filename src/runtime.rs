@@ -56,13 +56,14 @@ pub struct PyCallable {
 pub struct MemoryCell {
     pub data: UnsafeCell<Box<dyn Any>>,
     pub valid: bool,
+    pub frozen: bool,
 }
 
 pub struct Memory {
     pub memory: RefCell<Vec<MemoryCell>>,
     //gc graph stores: Key = memory addresses, Values = Other adresses that point to that memory addr
     //Every memory address has an entry here
-    pub gc_graph: HashMap<MemoryAddress, Vec<MemoryAddress>>,
+    //pub gc_graph: HashMap<MemoryAddress, Vec<MemoryAddress>>,
     pub recently_deallocated_indexes: RefCell<Vec<MemoryAddress>>,
 }
 
@@ -75,14 +76,6 @@ pub struct MemoryStatistics {
 
 impl Memory {
     pub fn get(&self, address: MemoryAddress) -> &mut Box<dyn Any> {
-        {
-            if address > self.memory.borrow().len() - 1 {
-                panic!(
-                    "Attempt to read from uninitialized memory at address {}",
-                    address
-                );
-            }
-        }
         let cell = &self.memory.borrow()[address];
         if cell.valid {
             //SAFETY: Python doesn't have ownership and borrowing, and we're trying to run a python program evaluated in Rust.
@@ -93,16 +86,10 @@ impl Memory {
     }
 
     pub fn write(&self, address: MemoryAddress, data: Box<dyn Any>) {
-        {
-            if address > self.memory.borrow().len() - 1 {
-                panic!(
-                    "Attempt to write in uninitialized memory at address {}",
-                    address
-                );
-            }
-        }
-
         let cell = &mut self.memory.borrow_mut()[address];
+
+        debug_assert!(!cell.frozen);
+
         if cell.valid {
             cell.data = UnsafeCell::new(data);
         } else {
@@ -110,16 +97,14 @@ impl Memory {
         }
     }
 
-    pub fn deallocate(&self, address: MemoryAddress) {
-        
-        if address > self.memory.borrow().len() - 1 {
-            panic!(
-                "Attempt to deallocate non-existent memory at address {}",
-                address
-            );
-        }
-        
+    pub fn freeze(&self, address: MemoryAddress) {
         let cell = &mut self.memory.borrow_mut()[address];
+        cell.frozen = true;
+    }
+
+    pub fn deallocate(&self, address: MemoryAddress) {
+        let cell = &mut self.memory.borrow_mut()[address];
+        if cell.frozen { return };
         if cell.valid {
             cell.data = UnsafeCell::new(Box::new(UninitializedMemory {}));
             cell.valid = false;
@@ -140,6 +125,7 @@ impl Memory {
         match dealloc {
             Some(address) => {
                 let mut cell = &mut self.memory.borrow_mut()[address];
+                debug_assert!(!cell.frozen);
                 if cell.valid {
                     panic!(
                         "Attempt to allocate onto already occupied address {}",
@@ -156,6 +142,7 @@ impl Memory {
                 borrow.push(MemoryCell {
                     data: UnsafeCell::new(Box::new(UninitializedMemory {})),
                     valid: true,
+                    frozen: false,
                 });
                 return borrow.len() - 1;
             }
@@ -184,20 +171,23 @@ pub struct StackFrame {
     pub current_function: MemoryAddress
 }
 
-pub struct InterpreterSpecialValues {
-    pub type_type: MemoryAddress,
-    pub none_type: MemoryAddress,
-    pub none_value: MemoryAddress,
-    pub not_implemented_type: MemoryAddress,
-    pub not_implemented_value: MemoryAddress,
-    pub callable_type: MemoryAddress,
-    pub module_type: MemoryAddress
+#[derive(PartialEq, Eq, Hash)]
+pub enum SpecialValue {
+    Type,
+    NoneType,
+    NoneValue,
+    NotImplementedType,
+    NotImplementedValue,
+    CallableType,
+    ModuleType,
+    TrueValue,
+    FalseValue,
 }
 
 pub struct Interpreter {
     pub stack: RefCell<Vec<StackFrame>>,
     pub memory: Memory,
-    pub special_values: InterpreterSpecialValues,
+    pub special_values: HashMap<SpecialValue, MemoryAddress>,
     pub modules: RefCell<HashMap<String, MemoryAddress>>,
     pub prog_counter: Cell<usize>
 }
@@ -211,19 +201,11 @@ impl Interpreter {
                 stack: vec![]
             }]),
             memory: Memory {
-                gc_graph: HashMap::new(),
+               // gc_graph: HashMap::new(),
                 memory: RefCell::new(vec![]),
                 recently_deallocated_indexes: RefCell::new(vec![]),
             },
-            special_values: InterpreterSpecialValues {
-                type_type: 0,
-                none_type: 0,
-                none_value: 0,
-                callable_type: 0,
-                not_implemented_type: 0,
-                not_implemented_value: 0,
-                module_type: 0
-            },
+            special_values: HashMap::new(),
             modules: RefCell::new(HashMap::new()),
             prog_counter: Cell::new(0)
         };
@@ -296,13 +278,22 @@ impl Interpreter {
             },
         }));
 
-        interpreter.special_values.type_type = type_type;
-        interpreter.special_values.none_type = none_type;
-        interpreter.special_values.none_value = none_value;
-        interpreter.special_values.not_implemented_type = not_implemented_type;
-        interpreter.special_values.not_implemented_value = not_implemented_value;
-        interpreter.special_values.callable_type = callable_type;
-        interpreter.special_values.module_type = module_type;
+        interpreter.freeze_in_memory(type_type);
+        interpreter.freeze_in_memory(none_type);
+        interpreter.freeze_in_memory(none_value);
+        interpreter.freeze_in_memory(not_implemented_type);
+        interpreter.freeze_in_memory(not_implemented_value);
+        interpreter.freeze_in_memory(callable_type);
+        interpreter.freeze_in_memory(module_type);
+
+        interpreter.special_values.insert(SpecialValue::Type, type_type);
+        interpreter.special_values.insert(SpecialValue::NoneType, none_type);
+        interpreter.special_values.insert(SpecialValue::NoneValue, none_value);
+        interpreter.special_values.insert(SpecialValue::NotImplementedType, not_implemented_type);
+        interpreter.special_values.insert(SpecialValue::NotImplementedValue, not_implemented_value);
+        interpreter.special_values.insert(SpecialValue::CallableType, callable_type);
+        interpreter.special_values.insert(SpecialValue::ModuleType, module_type);
+
         interpreter.modules.borrow_mut().insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
 
         return interpreter;
@@ -312,16 +303,14 @@ impl Interpreter {
         &self,
         module: &str,
         name: &str,
-        methods: HashMap<String, MemoryAddress>,
-        functions: HashMap<String, MemoryAddress>,
         supertype: Option<MemoryAddress>
     ) -> MemoryAddress {
         let created_type = PyObject {
-            type_addr: self.special_values.type_type,
+            type_addr: self.special_values[&SpecialValue::Type],
             structure: PyObjectStructure::Type {
                 name: name.to_string(),
-                bounded_functions: methods,
-                unbounded_functions: functions,
+                bounded_functions: HashMap::new(),
+                unbounded_functions: HashMap::new(),
                 supertype
             },
         };
@@ -426,7 +415,9 @@ impl Interpreter {
     pub fn decrease_refcount(&self, addr: MemoryAddress) {
         let pyobj = self.get_pyobj_byaddr(addr).unwrap();
         if let PyObjectStructure::Object {raw_data, refcount} = &mut pyobj.structure {
-            *refcount = *refcount - 1;
+            if *refcount > 0 {
+                *refcount = *refcount - 1;
+            }
             if *refcount <= 1 {
                 self.memory.deallocate(addr);
                 self.memory.deallocate(*raw_data);
@@ -523,6 +514,14 @@ impl Interpreter {
         self.allocate_module_type_byname_raw(BUILTIN_MODULE, name, raw_data)
     }
 
+    pub fn freeze_in_memory(&self, addr: MemoryAddress) {
+        self.memory.freeze(addr);
+        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+        if let PyObjectStructure::Object{raw_data, refcount: _} = pyobj.structure {
+            self.memory.freeze(raw_data);
+        }
+    }
+
     pub fn allocate_type_byaddr_raw_struct(
         &self,
         type_addr: MemoryAddress,
@@ -555,9 +554,28 @@ impl Interpreter {
         let raw_callable = self.allocate_and_write(Box::new(callable));
 
         self.allocate_type_byaddr_raw_struct(
-            self.special_values.callable_type,
+            self.special_values[&SpecialValue::CallableType],
             PyObjectStructure::Callable { code: raw_callable, name },
         )
+    }
+
+    pub fn register_bounded_func<F>(
+        &self, 
+        module_name: &str,
+        type_name: &str,
+        name: &str,
+        callable: F) where F: Fn(&Interpreter, CallParams) -> MemoryAddress + 'static {
+        let pycallable = PyCallable {
+            code: Box::new(callable)
+        };
+        let func_addr = self.create_callable_pyobj(pycallable, Some(name.to_string()));
+        let module = self.find_in_module(module_name, type_name).unwrap();
+        let pyobj = self.get_pyobj_byaddr(module).unwrap();
+        if let PyObjectStructure::Type{ name: _, bounded_functions, unbounded_functions: _, supertype: _ } = &mut pyobj.structure {
+            bounded_functions.insert(name.to_string(), func_addr);
+        } else {
+            panic!("Object is not a type: {}.{}", module_name, type_name);
+        }
     }
 
     pub fn get_raw_data_of_pyobj<T>(&self, addr: MemoryAddress) -> &T
@@ -771,12 +789,14 @@ impl Interpreter {
     }
 }
 
-pub fn check_builtin_func_params(name: &str, expected: usize, received: usize) {
-    if expected != received {
-        panic!(
-            "{}() expected {} arguments, got {}",
-            name, expected, received
-        );
+macro_rules! check_builtin_func_params {
+    ($name:expr, $expected:expr, $received:expr) => {
+        if $expected != $received {
+            panic!(
+                "{}() expected {} arguments, got {}",
+                $name, $expected, $received
+            );
+        }
     }
 }
 
@@ -787,8 +807,8 @@ mod tests {
 
     #[test]
     fn simply_instantiate_int() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let pyobj_int_addr = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
         assert_eq!(1, *result_value);
@@ -796,8 +816,8 @@ mod tests {
 
     #[test]
     fn simply_instantiate_bool() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let pyobj_int_addr = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
         let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
         assert_eq!(1, *result_value);
@@ -805,8 +825,8 @@ mod tests {
 
     #[test]
     fn call_int_add_int() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
 
@@ -819,8 +839,8 @@ mod tests {
 
     #[test]
     fn call_bool_add_int() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
 
@@ -833,8 +853,8 @@ mod tests {
 
     #[test]
     fn call_int_add_float() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
 
@@ -847,8 +867,8 @@ mod tests {
 
     #[test]
     fn call_float_add_int() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
 
@@ -862,8 +882,8 @@ mod tests {
 
     #[test]
     fn call_float_add_float() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.4 as f64));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(1.1 as f64));
 
@@ -876,8 +896,8 @@ mod tests {
 
     #[test]
     fn call_float_mul_float() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(2.0 as f64));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.0 as f64));
 
@@ -890,8 +910,8 @@ mod tests {
 
     #[test]
     fn call_int_mul_int() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(2 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
 
@@ -904,8 +924,8 @@ mod tests {
 
     #[test]
     fn bind_local_test() {
-        let interpreter = Interpreter::new();
-        register_builtins(&interpreter);
+        let mut interpreter = Interpreter::new();
+        register_builtins(&mut interpreter);
         let number = interpreter.allocate_type_byname_raw("int", Box::new(17 as i128));
         interpreter.bind_local("x", number);
 
