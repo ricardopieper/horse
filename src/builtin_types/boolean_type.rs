@@ -226,8 +226,8 @@ pub fn register_boolean_type(interpreter: &mut Interpreter) -> MemoryAddress {
     interpreter.special_values.insert(SpecialValue::TrueValue, true_value);
     interpreter.special_values.insert(SpecialValue::FalseValue, false_value);
 
-    interpreter.freeze_in_memory(true_value);
-    interpreter.freeze_in_memory(false_value);
+    interpreter.make_const(true_value);
+    interpreter.make_const(false_value);
 
     return float_type;
 }

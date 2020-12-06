@@ -56,7 +56,7 @@ pub struct PyCallable {
 pub struct MemoryCell {
     pub data: UnsafeCell<Box<dyn Any>>,
     pub valid: bool,
-    pub frozen: bool,
+    pub is_const: bool,
 }
 
 pub struct Memory {
@@ -88,7 +88,7 @@ impl Memory {
     pub fn write(&self, address: MemoryAddress, data: Box<dyn Any>) {
         let cell = &mut self.memory.borrow_mut()[address];
 
-        debug_assert!(!cell.frozen);
+        debug_assert!(!cell.is_const);
 
         if cell.valid {
             cell.data = UnsafeCell::new(data);
@@ -97,14 +97,14 @@ impl Memory {
         }
     }
 
-    pub fn freeze(&self, address: MemoryAddress) {
+    pub fn make_const(&self, address: MemoryAddress) {
         let cell = &mut self.memory.borrow_mut()[address];
-        cell.frozen = true;
+        cell.is_const = true;
     }
 
     pub fn deallocate(&self, address: MemoryAddress) {
         let cell = &mut self.memory.borrow_mut()[address];
-        if cell.frozen { return };
+        if cell.is_const { return };
         if cell.valid {
             cell.data = UnsafeCell::new(Box::new(UninitializedMemory {}));
             cell.valid = false;
@@ -125,7 +125,7 @@ impl Memory {
         match dealloc {
             Some(address) => {
                 let mut cell = &mut self.memory.borrow_mut()[address];
-                debug_assert!(!cell.frozen);
+                debug_assert!(!cell.is_const);
                 if cell.valid {
                     panic!(
                         "Attempt to allocate onto already occupied address {}",
@@ -142,7 +142,7 @@ impl Memory {
                 borrow.push(MemoryCell {
                     data: UnsafeCell::new(Box::new(UninitializedMemory {})),
                     valid: true,
-                    frozen: false,
+                    is_const: false,
                 });
                 return borrow.len() - 1;
             }
@@ -278,13 +278,13 @@ impl Interpreter {
             },
         }));
 
-        interpreter.freeze_in_memory(type_type);
-        interpreter.freeze_in_memory(none_type);
-        interpreter.freeze_in_memory(none_value);
-        interpreter.freeze_in_memory(not_implemented_type);
-        interpreter.freeze_in_memory(not_implemented_value);
-        interpreter.freeze_in_memory(callable_type);
-        interpreter.freeze_in_memory(module_type);
+        interpreter.make_const(type_type);
+        interpreter.make_const(none_type);
+        interpreter.make_const(none_value);
+        interpreter.make_const(not_implemented_type);
+        interpreter.make_const(not_implemented_value);
+        interpreter.make_const(callable_type);
+        interpreter.make_const(module_type);
 
         interpreter.special_values.insert(SpecialValue::Type, type_type);
         interpreter.special_values.insert(SpecialValue::NoneType, none_type);
@@ -514,11 +514,11 @@ impl Interpreter {
         self.allocate_module_type_byname_raw(BUILTIN_MODULE, name, raw_data)
     }
 
-    pub fn freeze_in_memory(&self, addr: MemoryAddress) {
-        self.memory.freeze(addr);
+    pub fn make_const(&self, addr: MemoryAddress) {
+        self.memory.make_const(addr);
         let pyobj = self.get_pyobj_byaddr(addr).unwrap();
         if let PyObjectStructure::Object{raw_data, refcount: _} = pyobj.structure {
-            self.memory.freeze(raw_data);
+            self.memory.make_const(raw_data);
         }
     }
 
