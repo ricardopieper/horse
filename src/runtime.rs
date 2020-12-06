@@ -50,7 +50,7 @@ pub struct CallParams {
 }
 
 pub struct PyCallable {
-    pub code: Box<dyn Fn(&Interpreter, CallParams) -> MemoryAddress>,
+    pub code: Box<dyn Fn(&Runtime, CallParams) -> MemoryAddress>,
 }
 
 pub struct MemoryCell {
@@ -184,7 +184,8 @@ pub enum SpecialValue {
     FalseValue,
 }
 
-pub struct Interpreter {
+pub struct Runtime {
+    pub program_consts: RefCell<Vec<MemoryAddress>>,
     pub stack: RefCell<Vec<StackFrame>>,
     pub memory: Memory,
     pub special_values: HashMap<SpecialValue, MemoryAddress>,
@@ -192,9 +193,9 @@ pub struct Interpreter {
     pub prog_counter: Cell<usize>
 }
 
-impl Interpreter {
-    pub fn new() -> Interpreter {
-        let mut interpreter = Interpreter {
+impl Runtime {
+    pub fn new() -> Runtime {
+        let mut interpreter = Runtime {
             stack: RefCell::new(vec![StackFrame{
                 values: HashMap::new(),
                 current_function: 0,
@@ -207,6 +208,7 @@ impl Interpreter {
             },
             special_values: HashMap::new(),
             modules: RefCell::new(HashMap::new()),
+            program_consts: RefCell::new(vec![]),
             prog_counter: Cell::new(0)
         };
 
@@ -297,6 +299,15 @@ impl Interpreter {
         interpreter.modules.borrow_mut().insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
 
         return interpreter;
+    }
+
+    pub fn store_const(&self, value: MemoryAddress) {
+        self.program_consts.borrow_mut().push(value);
+        self.make_const(value);
+    }
+
+    pub fn get_const(&self, index: usize) -> MemoryAddress {
+        return *self.program_consts.borrow().get(index).unwrap()
     }
 
     pub fn create_type(
@@ -564,7 +575,7 @@ impl Interpreter {
         module_name: &str,
         type_name: &str,
         name: &str,
-        callable: F) where F: Fn(&Interpreter, CallParams) -> MemoryAddress + 'static {
+        callable: F) where F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static {
         let pycallable = PyCallable {
             code: Box::new(callable)
         };
@@ -613,8 +624,8 @@ impl Interpreter {
         let callable_pyobj = self.get_pyobj_byaddr(callable_addr).unwrap();
 
         if let PyObjectStructure::Callable { code, name: _ } = &callable_pyobj.structure {
-            let pyobj_callable = self
-                .get_rawdata_byaddr(*code)
+            let raw_callable = self.get_rawdata_byaddr(*code);
+            let pyobj_callable = raw_callable
                 .downcast_ref::<PyCallable>()
                 .unwrap();
             return (pyobj_callable.code)(self, call_params);
@@ -647,12 +658,13 @@ impl Interpreter {
 
         //type_pyobj must be a type
         if let PyObjectStructure::Type {
-            name: _,
+            name,
             bounded_functions: _,
             unbounded_functions: _,
             supertype: _
         } = &type_pyobj.structure
         {
+            println!("Calling method {}", name);
             let bounded_method = self.get_pyobj_byaddr(method_addr);
             if let Some(bounded_method_pyobj) = bounded_method {
 
@@ -740,7 +752,6 @@ impl Interpreter {
         }
     }
 
-
     pub fn push_onto_stack(&self, value: MemoryAddress) {
         self.stack.borrow_mut().last_mut().unwrap().stack.push(value)
     }
@@ -807,7 +818,7 @@ mod tests {
 
     #[test]
     fn simply_instantiate_int() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let pyobj_int_addr = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
@@ -816,7 +827,7 @@ mod tests {
 
     #[test]
     fn simply_instantiate_bool() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let pyobj_int_addr = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
         let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
@@ -825,7 +836,7 @@ mod tests {
 
     #[test]
     fn call_int_add_int() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
@@ -839,7 +850,7 @@ mod tests {
 
     #[test]
     fn call_bool_add_int() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
@@ -853,7 +864,7 @@ mod tests {
 
     #[test]
     fn call_int_add_float() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
@@ -867,7 +878,7 @@ mod tests {
 
     #[test]
     fn call_float_add_int() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
@@ -882,7 +893,7 @@ mod tests {
 
     #[test]
     fn call_float_add_float() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.4 as f64));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(1.1 as f64));
@@ -896,7 +907,7 @@ mod tests {
 
     #[test]
     fn call_float_mul_float() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("float", Box::new(2.0 as f64));
         let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.0 as f64));
@@ -910,7 +921,7 @@ mod tests {
 
     #[test]
     fn call_int_mul_int() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_type_byname_raw("int", Box::new(2 as i128));
         let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
@@ -924,7 +935,7 @@ mod tests {
 
     #[test]
     fn bind_local_test() {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
         let number = interpreter.allocate_type_byname_raw("int", Box::new(17 as i128));
         interpreter.bind_local("x", number);

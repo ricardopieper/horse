@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use crate::float::Float;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Operator {
@@ -21,22 +21,6 @@ pub enum Operator {
     GreaterEquals,
     Less,
     LessEquals
-}
-#[derive(PartialOrd, PartialEq, Debug, Copy, Clone)]
-pub struct Float(pub f64);
-
-impl From<f64> for Float {
-    fn from(w: f64) -> Float {
-        Float(w)
-    }
-}
-
-impl Eq for Float {}
-
-impl Ord for Float {
-    fn cmp(&self, other: &Float) -> Ordering {
-        self.partial_cmp(other).unwrap()
-    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]

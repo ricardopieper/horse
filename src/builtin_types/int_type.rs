@@ -2,35 +2,35 @@ use crate::runtime::*;
 
 macro_rules! create_compare_function {
     ($name:tt, $param_a:tt, $param_b:tt, $compare:expr) => {
-        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
                     
-            let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
-            let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+            let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
+            let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
             
             return match other_type_name {
             "bool" | "int" => {
-                    let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
+                    let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
                     let $param_a = self_data;
                     let $param_b = other_int;
                     if $compare {
-                        return interpreter.special_values[&SpecialValue::TrueValue];
+                        return runtime.special_values[&SpecialValue::TrueValue];
                     } else {
-                        return interpreter.special_values[&SpecialValue::FalseValue];
+                        return runtime.special_values[&SpecialValue::FalseValue];
                     }
                 },
                 "float" => {
-                    let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
+                    let other_float = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
                     let $param_a = *self_data as f64;
                     let $param_b = *other_float;
                     if $compare {
-                        return interpreter.special_values[&SpecialValue::TrueValue];
+                        return runtime.special_values[&SpecialValue::TrueValue];
                     } else {
-                        return interpreter.special_values[&SpecialValue::FalseValue];
+                        return runtime.special_values[&SpecialValue::FalseValue];
                     }
                 },
                 _ => {
-                    interpreter.special_values[&SpecialValue::NotImplementedValue]
+                    runtime.special_values[&SpecialValue::NotImplementedValue]
                 }
             };
         }
@@ -39,28 +39,28 @@ macro_rules! create_compare_function {
 
 macro_rules! create_binop_function {
     ($name:tt, $param_a:tt, $param_b:tt, $binop:expr) => {
-        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
         
             check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
             
-            let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
-            let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+            let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
+            let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
             
             return match other_type_name {
                 "int" => {
-                    let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
+                    let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
                     let $param_a = self_data;
                     let $param_b = other_int;
-                    interpreter.allocate_type_byname_raw("int", Box::new($binop))
+                    runtime.allocate_type_byname_raw("int", Box::new($binop))
                 },
                 "float" => {
-                    let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
+                    let other_float = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
                     let $param_a = *self_data as f64;
                     let $param_b = *other_float;
-                    interpreter.allocate_type_byname_raw("float", Box::new($binop))
+                    runtime.allocate_type_byname_raw("float", Box::new($binop))
                 },
                 _ => {
-                    interpreter.special_values[&SpecialValue::NotImplementedValue]
+                    runtime.special_values[&SpecialValue::NotImplementedValue]
                 }
             };
         }
@@ -69,11 +69,11 @@ macro_rules! create_binop_function {
 
 macro_rules! create_unary_function {
     ($name:tt, $param_a:tt, $func:expr) => {
-        fn $name(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
-            let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+            let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
             let $param_a = *self_data;
-            interpreter.allocate_type_byname_raw("int", Box::new($func))            
+            runtime.allocate_type_byname_raw("int", Box::new($func))            
         }
     }
 }
@@ -90,23 +90,23 @@ create_binop_function!(modulus, a, b, a % b);
 create_binop_function!(sub, a, b, a - b);
 create_binop_function!(mul, a, b, a * b);
 
-fn truediv(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+fn truediv(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.as_ref().unwrap().as_str(), 1, params.params.len());
             
-    let other_type_name = interpreter.get_pyobj_type_name(params.params[0]);
-    let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
+    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
     
     return match other_type_name {
         "int" => {
-            let other_int = interpreter.get_raw_data_of_pyobj::<i128>(params.params[0]);
-            interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_int as f64))
+            let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
+            runtime.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_int as f64))
         },
         "float" => {
-            let other_float = interpreter.get_raw_data_of_pyobj::<f64>(params.params[0]);
-            interpreter.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_float))
+            let other_float = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
+            runtime.allocate_type_byname_raw("float", Box::new(*self_data as f64 / *other_float))
         },
         _ => {
-            interpreter.special_values[&SpecialValue::NotImplementedValue]
+            runtime.special_values[&SpecialValue::NotImplementedValue]
         }
     };
 }
@@ -114,66 +114,66 @@ fn truediv(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
 create_unary_function!(negation, a, a * -1);
 create_unary_function!(positive, a, a);
 
-fn int(_interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+fn int(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
     //no-op
     return params.bound_pyobj.unwrap();
 }
 
-fn float(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+fn float(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
-    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    interpreter.allocate_type_byname_raw("float", Box::new(self_data as f64))
+    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    runtime.allocate_type_byname_raw("float", Box::new(self_data as f64))
 }
 
 
-fn to_str(interpreter: & Interpreter, params: CallParams) -> MemoryAddress {
+fn to_str(runtime: & Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
-    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
+    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    runtime.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
 }
 
-fn repr(interpreter: & Interpreter, params: CallParams) -> MemoryAddress {
+fn repr(runtime: & Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
-    let self_data = *interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    interpreter.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
+    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    runtime.allocate_type_byname_raw("str", Box::new(self_data.to_string()))
 }
 
-fn to_boolean(interpreter: &Interpreter, params: CallParams) -> MemoryAddress {
+fn to_boolean(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap().as_str(), 0, params.params.len());
-    let self_data = interpreter.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
     if *self_data == 1 {
-        return interpreter.special_values[&SpecialValue::TrueValue];
+        return runtime.special_values[&SpecialValue::TrueValue];
     } else {
-        return interpreter.special_values[&SpecialValue::FalseValue];
+        return runtime.special_values[&SpecialValue::FalseValue];
     }
 }
 
 
-pub fn register_int_type(interpreter: &Interpreter) -> MemoryAddress {
-    let int_type = interpreter.create_type(BUILTIN_MODULE, "int", None);
+pub fn register_int_type(runtime: &Runtime) -> MemoryAddress {
+    let int_type = runtime.create_type(BUILTIN_MODULE, "int", None);
     
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__eq__", equals);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__gt__", greater_than);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__ge__", greater_equals);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__lt__", less_than);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__le__", less_equals);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__ne__", not_equals);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__eq__", equals);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__gt__", greater_than);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__ge__", greater_equals);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__lt__", less_than);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__le__", less_equals);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__ne__", not_equals);
 
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__add__", add);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__mod__", modulus);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__sub__", sub);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__mul__", mul);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__truediv__", truediv);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__add__", add);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__mod__", modulus);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__sub__", sub);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__mul__", mul);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__truediv__", truediv);
 
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__neg__", negation);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__pos__", positive);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__neg__", negation);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__pos__", positive);
 
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__bool__", to_boolean);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__int__", int);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__float__", float);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__str__", to_str);
-    interpreter.register_bounded_func(BUILTIN_MODULE, "int",  "__repr__", repr);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__bool__", to_boolean);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__int__", int);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__float__", float);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__str__", to_str);
+    runtime.register_bounded_func(BUILTIN_MODULE, "int",  "__repr__", repr);
    
     return int_type;
 }
