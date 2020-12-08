@@ -105,7 +105,7 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             });
             return final_instructions;
         }
-        Expr::Variable(var_name) => vec![Instruction::LoadName(var_name)],
+        Expr::Variable(var_name) => vec![Instruction::UnresolvedLoadName(var_name)],
         Expr::Parenthesized(_) => panic!("Parenthesized expr should not leak to compiler"),
     }
 }
@@ -119,6 +119,30 @@ pub fn compile(ast: Vec<AST>) -> Program {
     let mut const_values_and_indices = HashMap::new();
     let instructions = compile_ast(ast, 0, &mut const_values_and_indices);
 
+    let mut names_indices = HashMap::new();
+
+    for instruction in instructions.iter() {
+        if let Instruction::UnresolvedStoreName(name) = instruction {
+            if !names_indices.contains_key(name) {
+                names_indices.insert(name, names_indices.len());
+            }
+        }
+    }
+
+    let new_instructions = instructions.iter().map(|instruction| {
+        return if let Instruction::UnresolvedLoadName(name) = instruction {
+            let idx = names_indices.get(&name).unwrap();
+            Instruction::LoadName(*idx)
+        }
+        else if let Instruction::UnresolvedStoreName(name) = instruction {
+            let idx = names_indices.get(&name).unwrap();
+            Instruction::StoreName(*idx)
+        }
+        else {
+            instruction.clone()
+        }
+    }).collect();
+
     let mut vec_const = vec![];
     for (constval, index) in const_values_and_indices {
         vec_const.push(ConstAndIndex {
@@ -130,7 +154,7 @@ pub fn compile(ast: Vec<AST>) -> Program {
 
     Program {
         data: vec_const.into_iter().map(|x| x.constval).collect(),
-        code: instructions
+        code: new_instructions
     }
 }
 
@@ -145,7 +169,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
                 expression,
             } => {
                 all_instructions.append(&mut compile_expr(expression, const_map));
-                all_instructions.push(Instruction::StoreName(variable_name));
+                all_instructions.push(Instruction::UnresolvedStoreName(variable_name));
             }
             AST::StandaloneExpr(expr) => {
                 all_instructions.append(&mut compile_expr(expr, const_map));
@@ -232,7 +256,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
             //_ => panic!("Instruction not covered: {:?}", ast_item)
         }
     }
- 
+
     return all_instructions;
 }
 
@@ -245,8 +269,8 @@ mod tests {
 
     #[test]
     fn while_statements() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize(
             "
 x = 0
@@ -258,17 +282,17 @@ while x < 10:
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let y_value = interpreter.get_local("y").unwrap();
-        let raw_y = interpreter.get_raw_data_of_pyobj::<i128>(y_value);
-        assert_eq!(*raw_y, 10);
+        let program = compile(expr);
+        interpreter::execute_program(&mut runtime, program);
+        let y_value = runtime.get_local(1).unwrap();
+        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
+        assert_eq!(raw_y, 10);
     }
 
     #[test]
     fn while_statements_with_conditional_break() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize(
             "
 x = 0
@@ -283,16 +307,16 @@ while x < 10:
         .unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let y_value = interpreter.get_local("y").unwrap();
-        let raw_y = interpreter.get_raw_data_of_pyobj::<i128>(y_value);
-        assert_eq!(*raw_y, 5);
+        interpreter::execute_program(&mut runtime, program);
+        let y_value = runtime.get_local(1).unwrap();
+        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
+        assert_eq!(raw_y, 5);
     }
 
     #[test]
     fn if_else_statements() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize(
             "
 x = 999
@@ -306,82 +330,88 @@ else:
         .unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let y_value = interpreter.get_local("y").unwrap();
-        let raw_y = interpreter.get_raw_data_of_pyobj::<i128>(y_value);
-        assert_eq!(*raw_y, 3);
+        interpreter::execute_program(&mut runtime, program);
+        let y_value = runtime.get_local(1).unwrap();
+        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
+        assert_eq!(raw_y, 3);
     }
 
     #[test]
     fn test_literal_int_1() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("1").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
 
     #[test]
     fn test_literal_float_1() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("1.0").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 1.0);
     }
 
     #[test]
     fn test_literal_boolean_true() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("True").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
 
     #[test]
     fn test_literal_boolean_false() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("False").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 0);
     }
 
     #[test]
     fn test_1_plus_1() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("1 + 1").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 2);
     }
 
     #[test]
     fn test_1_plus_float_3_5() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("1 + 3.5").unwrap();
         let expr = parse_ast(tokens);
         println!("AST: {:?}", expr);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 4.5);
     }
 
@@ -389,13 +419,14 @@ else:
     fn test_neg() {
         //-(5.0 / 9.0)
         let expected_result = -(5.0_f64 / 9.0_f64);
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("-(5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -403,13 +434,14 @@ else:
     fn test_div_neg_mul() {
         //-(5.0 / 9.0) * 32)
         let expected_result = -(5.0_f64 / 9.0_f64) * 32.0_f64;
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("-(5.0 / 9.0) * 32.0").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -417,26 +449,28 @@ else:
     fn test_div_minus_div() {
         //(1 - (5.0 / 9.0))
         let expected_result = 1.0_f64 - (5.0_f64 / 9.0_f64);
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("1.0 - (5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_fahrenheit() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64) / (1.0_f64 - (5.0_f64 / 9.0_f64));
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("(-(5.0 / 9.0) * 32.0) / (1.0 - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -444,76 +478,68 @@ else:
     fn test_function_calls_with_complex_expr() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64).sin().cos()
             / (1.0_f64.cos() - (5.0_f64 / 9.0_f64)).tanh();
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens =
             tokenize("cos(sin(-(5.0 / 9.0) * 32.0)) / tanh(cos(1.0) - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_fcall() {
         let expected_result = 1.0_f64.sin();
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("sin(1.0)").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
-        assert_eq!(stack_value, expected_result);
-    }
-
-    #[test]
-    fn test_fcall_2params() {
-        let expected_result = 1.0_f64 / 2.0_f64;
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
-        let tokens = tokenize("test(1.0, 2.0)").unwrap();
-        let expr = parse_ast(tokens);
-        let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<f64>(interpreter.pop_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_pop = runtime.pop_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_bind_local() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("x = 1 + 2").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.get_local("x").unwrap());
+        interpreter::execute_program(&mut runtime, program);
+        let x = runtime.get_local(0).unwrap();
+        let stack_value = runtime.get_raw_data_of_pyobj(x).take_int();
         assert_eq!(stack_value, 3);
     }
 
     #[test]
     fn test_string_concat() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("\"abc\" + 'cde'").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = interpreter.get_raw_data_of_pyobj::<String>(interpreter.top_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_top = runtime.top_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_string();
         assert_eq!(stack_value, "abccde");
     }
 
     #[test]
     fn boolean_and() {
-        let mut interpreter = Runtime::new();
-        register_builtins(&mut interpreter);
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
         let tokens = tokenize("True and False").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile(expr);
-        interpreter::execute_program(&interpreter, program);
-        let stack_value = *interpreter.get_raw_data_of_pyobj::<i128>(interpreter.top_stack());
+        interpreter::execute_program(&mut runtime, program);
+        let stack_top = runtime.top_stack();
+        let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
         assert_eq!(stack_value, 0);
     }
 }

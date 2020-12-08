@@ -1,30 +1,31 @@
 use crate::runtime::*;
+use crate::float::Float;
 
 macro_rules! create_compare_function {
     ($name:tt, $param_a:tt, $param_b:tt, $compare:expr) => {
-        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
             
             let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
-            let self_data = runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
+            let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
             
             return match other_type_name {
                "bool" | "int" => {
-                    let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
-                    let $param_a = *self_data;
-                    let $param_b = *other_int as f64;
+                    let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
+                    let $param_a = self_data;
+                    let $param_b = other_int as f64;
                     let result_compare = $compare;
                     let result_as_int: i128 = if result_compare {1} else {0};
                    
-                    runtime.allocate_type_byname_raw("bool", Box::new(result_as_int))
+                    runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(result_as_int))
                 },
                 "float" => {
-                    let other_float = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
-                    let $param_a = *self_data;
-                    let $param_b = *other_float;
+                    let other_float = runtime.get_raw_data_of_pyobj(params.params[0]).take_float();
+                    let $param_a = self_data;
+                    let $param_b = other_float;
                     let result_compare = $compare;
                     let result_as_int: i128 = if result_compare {1} else {0};
-                    runtime.allocate_type_byname_raw("bool", Box::new(result_as_int))
+                    runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(result_as_int))
                 },
                 _ => {
                     runtime.special_values[&SpecialValue::NotImplementedValue]
@@ -36,25 +37,25 @@ macro_rules! create_compare_function {
 
 macro_rules! create_binop_function {
     ($name:tt, $param_a:tt, $param_b:tt, $binop:expr) => {
-        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
         
             check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
             
             let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
-            let self_data = runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
+            let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
             
             return match other_type_name {
                 "int" => {
-                    let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
-                    let $param_a = *self_data;
-                    let $param_b = *other_int as f64;
-                    runtime.allocate_type_byname_raw("float", Box::new($binop))
+                    let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
+                    let $param_a = self_data;
+                    let $param_b = other_int as f64;
+                    runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float($binop)))
                 },
                 "float" => {
-                    let other_float = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
-                    let $param_a = *self_data;
-                    let $param_b = *other_float;
-                    runtime.allocate_type_byname_raw("float", Box::new($binop))
+                    let other_float = runtime.get_raw_data_of_pyobj(params.params[0]).take_float();
+                    let $param_a = self_data;
+                    let $param_b = other_float;
+                    runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float($binop)))
                 },
                 _ => {
                     runtime.special_values[&SpecialValue::NotImplementedValue]
@@ -66,11 +67,11 @@ macro_rules! create_binop_function {
 
 macro_rules! create_unary_function {
     ($name:tt, $param_a:tt, $func:expr) => {
-        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-            let self_data = runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
-            let $param_a = *self_data;
-            runtime.allocate_type_byname_raw("float", Box::new($func))
+            let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
+            let $param_a = self_data;
+            runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float($func)))
         }
     }
 }
@@ -92,39 +93,39 @@ create_binop_function!(truediv, a, b, a / b);
 create_unary_function!(negation, a, a * -1.0);
 create_unary_function!(positive, a, a);
 
-fn to_boolean(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_boolean(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
-    if *self_data == 0.0 {
-        runtime.allocate_type_byname_raw("bool", Box::new(0))
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
+    if self_data == 0.0 {
+        runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(0))
     } else {
-        runtime.allocate_type_byname_raw("bool", Box::new(1))
+        runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1))
     }
 }
 
-fn to_float(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_float(_runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     return params.bound_pyobj.unwrap();
 }
 
-fn to_int(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = *runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
-    runtime.allocate_type_byname_raw("int", Box::new(self_data as i128))
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
+    runtime.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(self_data as i128))
 }
 
-fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {    
+fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {    
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = *runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
     let formatted = format!("{:?}", self_data);
-    runtime.allocate_type_byname_raw("str", Box::new(formatted))
+    runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(formatted))
 }
 
-fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = *runtime.get_raw_data_of_pyobj::<f64>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_float();
     let formatted = format!("{:?}", self_data);
-    runtime.allocate_type_byname_raw("str", Box::new(formatted))
+    runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(formatted))
 }
 
 pub fn register_float_type(runtime: &mut Runtime) -> MemoryAddress {

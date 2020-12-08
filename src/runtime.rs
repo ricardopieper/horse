@@ -1,10 +1,7 @@
-
-use std::any::Any;
-use std::cell::RefCell;
 use std::cell::Cell;
-use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use crate::float::Float;
 
 /* this is done by somewhat following the python data model in https://docs.python.org/3/reference/datamodel.html */
 
@@ -12,15 +9,63 @@ pub type MemoryAddress = usize;
 
 pub const BUILTIN_MODULE: &'static str = "__builtin__";
 
+
+pub struct PyCallable {
+    pub code: Box<dyn Fn(&mut Runtime, CallParams) -> MemoryAddress>,
+}
+
+impl std::fmt::Debug for PyCallable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[rust native code]")
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum BuiltInTypeData {
+    Int(i128),
+    Float(Float),
+    String(String)
+}
+
+impl BuiltInTypeData {
+    pub fn take_float(&self) -> f64 {
+        match self {
+            BuiltInTypeData::Float(Float(f)) => *f,
+            _ => {
+                panic!("Tried to transform something into float unexpectedly")
+            }
+        }
+    }
+    
+    pub fn take_int(&self) -> i128 {
+        match self {
+            BuiltInTypeData::Int(i) => *i,
+            _ => {
+                panic!("Tried to transform something into int unexpectedly")
+            }
+        }
+    }
+
+    pub fn take_string(&self) -> &String {
+        match self {
+            BuiltInTypeData::String(s) => s,
+            _ => {
+                panic!("Tried to transform something into string unexpectedly")
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum PyObjectStructure {
     None,
     NotImplemented,
     Object {
-        raw_data: Box<dyn Any>,
+        raw_data: BuiltInTypeData,
         refcount: usize
     },
-    Callable {
-        code: Box<dyn Fn(&Runtime, CallParams) -> MemoryAddress>,
+    NativeCallable {
+        code: PyCallable,
         name: Option<String>
     },
     Type {
@@ -35,6 +80,7 @@ pub enum PyObjectStructure {
     }
 }
 
+#[derive(Debug)]
 pub struct PyObject {
     pub type_addr: MemoryAddress,
     pub structure: PyObjectStructure,
@@ -47,14 +93,8 @@ pub struct CallParams<'a> {
     pub params: &'a [MemoryAddress],
 }
 
-pub struct PyCallable {
-    pub code: Box<dyn Fn(&Runtime, CallParams) -> MemoryAddress>,
-}
-
-pub struct Null {}
-
 pub struct MemoryCell {
-    pub data: PyObject,
+    pub data: Option<PyObject>,
     pub valid: bool,
     pub is_const: bool,
 }
@@ -76,25 +116,25 @@ impl Memory {
     pub fn get(&self, address: MemoryAddress) -> &PyObject {
         let cell = &self.memory[address];
         if cell.valid {
-            return &cell.data;
+            return &cell.data.as_ref().unwrap();
         } else {
             panic!("Attempt to read from non-valid memory address {}", address);
         }
     }
     pub fn get_mut(&mut self, address: MemoryAddress) -> &mut PyObject {
-        let cell = &self.memory[address];
+        let cell = &mut self.memory[address];
         if cell.valid {
-            return &mut cell.data;
+            return cell.data.as_mut().unwrap()
         } else {
             panic!("Attempt to read from non-valid memory address {}", address);
         }
     }
 
-    pub fn write<T: Any + Debug>(&mut self, address: MemoryAddress, data: PyObject) {
+    pub fn write(&mut self, address: MemoryAddress, data: PyObject) {
         let cell = &mut self.memory[address];
         debug_assert!(!cell.is_const);
         if cell.valid {
-            cell.data = data;
+            cell.data = Some(data);
         } else {
             panic!("Attempt to write in non-valid memory address {}", address);
         }
@@ -117,7 +157,7 @@ impl Memory {
         self.recently_deallocated_indexes.push(address);
     }
 
-    pub fn allocate(&self) -> MemoryAddress {
+    pub fn allocate(&mut self) -> MemoryAddress {
         let dealloc = self.recently_deallocated_indexes.pop();
 
         match dealloc {
@@ -130,36 +170,31 @@ impl Memory {
                         address
                     )
                 } else {
-                    unsafe {
-                        let ptr = &mut *cell.data.get();
-                        *ptr = CellValue::Uninitialized
-                    }
+                    cell.data = None;    
                     cell.valid = true;
                 }
                 return address;
             }
             None => {
-                let mut borrow = self.memory.borrow_mut();
-                borrow.push(MemoryCell {
-                    data: UnsafeCell::new(CellValue::Uninitialized),
+                self.memory.push(MemoryCell {
+                    data: None,
                     valid: true,
                     is_const: false,
                 });
-                return borrow.len() - 1;
+                return self.memory.len() - 1;
             }
         };
     }
 
-    pub fn allocate_and_write<T: Any + Debug>(&self, data: T) -> MemoryAddress {
+    pub fn allocate_and_write(&mut self, data: PyObject) -> MemoryAddress {
         let address = self.allocate();
         self.write(address, data);
         return address;
     }
 
     pub fn get_statistics(&self) -> MemoryStatistics {
-        let mem = self.memory.borrow();
-        let allocated_slots = mem.len();
-        let slots_in_use = mem.iter().filter(|x| x.valid).count();
+        let allocated_slots = self.memory.len();
+        let slots_in_use = self.memory.iter().filter(|x| x.valid).count();
         MemoryStatistics {
             allocated_slots, slots_in_use
         }
@@ -167,7 +202,7 @@ impl Memory {
 }
 
 pub struct StackFrame {
-    pub values: HashMap<String, MemoryAddress>,
+    pub values: Vec<MemoryAddress>,
     pub stack: Vec<MemoryAddress>,
     pub current_function: MemoryAddress
 }
@@ -193,31 +228,31 @@ pub struct BuiltinTypeAddresses {
 }
 
 pub struct Runtime {
-    pub program_consts: RefCell<Vec<MemoryAddress>>,
-    pub stack: RefCell<Vec<StackFrame>>,
+    pub program_consts: Vec<MemoryAddress>,
+    pub stack: Vec<StackFrame>,
     pub memory: Memory,
     pub builtin_type_addrs: BuiltinTypeAddresses,
     pub special_values: HashMap<SpecialValue, MemoryAddress>,
-    pub modules: RefCell<HashMap<String, MemoryAddress>>,
+    pub modules: HashMap<String, MemoryAddress>,
     pub prog_counter: Cell<usize>
 }
 
-impl Runtime {
+impl  Runtime {
     pub fn new() -> Runtime {
         let mut interpreter = Runtime {
-            stack: RefCell::new(vec![StackFrame{
-                values: HashMap::new(),
+            stack: vec![StackFrame{
+                values: vec![],
                 current_function: 0,
                 stack: vec![]
-            }]),
+            }],
             memory: Memory {
                // gc_graph: HashMap::new(),
-                memory: RefCell::new(vec![]),
-                recently_deallocated_indexes: RefCell::new(vec![]),
+                memory: vec![],
+                recently_deallocated_indexes: vec![],
             },
             special_values: HashMap::new(),
-            modules: RefCell::new(HashMap::new()),
-            program_consts: RefCell::new(vec![]),
+            modules: HashMap::new(),
+            program_consts: vec![],
             prog_counter: Cell::new(0),
             builtin_type_addrs: BuiltinTypeAddresses {
                 int: 0,
@@ -229,7 +264,7 @@ impl Runtime {
             }
         };
 
-        let type_type = interpreter.allocate_and_write(Box::new(PyObject {
+        let type_type = interpreter.allocate_and_write(PyObject {
             type_addr: 0,
             structure: PyObjectStructure::Type {
                 name: String::from("type"),
@@ -237,9 +272,9 @@ impl Runtime {
                 unbounded_functions: HashMap::new(),
                 supertype: None
             },
-        }));
+        });
 
-        let none_type = interpreter.allocate_and_write(Box::new(PyObject {
+        let none_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
             structure: PyObjectStructure::Type {
                 name: String::from("NoneType"),
@@ -247,14 +282,14 @@ impl Runtime {
                 unbounded_functions: HashMap::new(),
                 supertype: None
             },
-        }));
+        });
 
-        let none_value = interpreter.allocate_and_write(Box::new(PyObject {
+        let none_value = interpreter.allocate_and_write(PyObject {
             type_addr: none_type,
             structure: PyObjectStructure::None,
-        }));
+        });
 
-        let not_implemented_type = interpreter.allocate_and_write(Box::new(PyObject {
+        let not_implemented_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
             structure: PyObjectStructure::Type {
                 name: String::from("NotImplemented"),
@@ -262,14 +297,14 @@ impl Runtime {
                 unbounded_functions: HashMap::new(),
                 supertype: None
             },
-        }));
+        });
 
-        let not_implemented_value = interpreter.allocate_and_write(Box::new(PyObject {
+        let not_implemented_value = interpreter.allocate_and_write(PyObject {
             type_addr: not_implemented_type,
             structure: PyObjectStructure::NotImplemented,
-        }));
+        });
 
-        let callable_type = interpreter.allocate_and_write(Box::new(PyObject {
+        let callable_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
             structure: PyObjectStructure::Type {
                 name: String::from("function"),
@@ -277,9 +312,9 @@ impl Runtime {
                 unbounded_functions: HashMap::new(),
                 supertype: None
             },
-        }));
+        });
 
-        let module_type = interpreter.allocate_and_write(Box::new(PyObject {
+        let module_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
             structure: PyObjectStructure::Type {
                 name: String::from("module"),
@@ -287,15 +322,15 @@ impl Runtime {
                 unbounded_functions: HashMap::new(),
                 supertype: None
             },
-        }));
+        });
 
-        let builtin_module_obj = interpreter.allocate_and_write(Box::new(PyObject {
+        let builtin_module_obj = interpreter.allocate_and_write(PyObject {
             type_addr: module_type,
             structure: PyObjectStructure::Module {
                 name: BUILTIN_MODULE.to_string(),
                 objects: HashMap::new()
             },
-        }));
+        });
 
         interpreter.make_const(type_type);
         interpreter.make_const(none_type);
@@ -313,22 +348,22 @@ impl Runtime {
         interpreter.special_values.insert(SpecialValue::CallableType, callable_type);
         interpreter.special_values.insert(SpecialValue::ModuleType, module_type);
 
-        interpreter.modules.borrow_mut().insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
+        interpreter.modules.insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
 
         return interpreter;
     }
 
-    pub fn store_const(&self, value: MemoryAddress) {
-        self.program_consts.borrow_mut().push(value);
+    pub fn store_const(&mut self, value: MemoryAddress) {
+        self.program_consts.push(value);
         self.make_const(value);
     }
 
     pub fn get_const(&self, index: usize) -> MemoryAddress {
-        return *self.program_consts.borrow().get(index).unwrap()
+        return *self.program_consts.get(index).unwrap()
     }
 
     pub fn create_type(
-        &self,
+        &mut self,
         module: &str,
         name: &str,
         supertype: Option<MemoryAddress>
@@ -342,189 +377,139 @@ impl Runtime {
                 supertype
             },
         };
-        let type_address = self.allocate_and_write(Box::new(created_type));
-        match self.modules.borrow().get(module) {
-            Some(module_addr) => {
-                match self.get_pyobj_byaddr(*module_addr) {
-                    Some(pyobj) => {
-                        match &mut pyobj.structure {
-                            PyObjectStructure::Module{name: _, objects} => {
-
-                                match objects.get(name) {
-                                    Some(_) => {
-                                        panic!("Name already exists in module {}: {}", module, name);
-                                    },
-                                    None => {
-                                        objects.insert(name.to_string(), type_address);
-                                        return type_address;
-                                    }
-                                }
-                            },
-                            _ => {
-                                panic!("Module name {} was found but it's not actually a module: {:?}", module, pyobj.structure);
-                            }
-                        }
+        let type_address = self.allocate_and_write(created_type);
+        let module_addr = *self.modules.get(module).unwrap();
+        let pyobj = self.get_pyobj_byaddr_mut(module_addr);
+        match &mut pyobj.structure {
+            PyObjectStructure::Module{name: _, objects} => {
+                match objects.get(name) {
+                    Some(_) => {
+                        panic!("Name already exists in module {}: {}", module, name);
                     },
                     None => {
-                        panic!("Module name {} was found but does not exist in memory: {}", module, module_addr);
+                        objects.insert(name.to_string(), type_address);
+                        return type_address;
                     }
                 }
             },
-            None => {
-                panic!("Module does not exist: {}", module);
+            _ => {
+                panic!("Module name {} was found but it's not actually a module", module);
             }
         }
     }
 
     pub fn add_to_module(
-        &self,
+        &mut self,
         module: &str,
         name: &str,
         pyobject_addr: MemoryAddress
     ) {
-        match self.modules.borrow().get(module) {
-            Some(module_addr) => {
-                match self.get_pyobj_byaddr(*module_addr) {
-                    Some(pyobj) => {
-                        match &mut pyobj.structure {
-                            PyObjectStructure::Module{name: _, objects} => {
-
-                                match objects.get(name) {
-                                    Some(_) => {
-                                        panic!("Name already exists in module {}: {}", module, name);
-                                    },
-                                    None => {
-                                        objects.insert(name.to_string(), pyobject_addr);
-                                    }
-                                }
-                            },
-                            _ => {
-                                panic!("Module name {} was found but it's not actually a module: {:?}", module, pyobj.structure);
-                            }
-                        }
+        let module_addr = *self.modules.get(module).unwrap();
+        let pyobj = self.get_pyobj_byaddr_mut(module_addr);
+        match &mut pyobj.structure {
+            PyObjectStructure::Module{name: _, objects} => {
+                match objects.get(name) {
+                    Some(_) => {
+                        panic!("Name already exists in module {}: {}", module, name);
                     },
                     None => {
-                        panic!("Module name {} was found but does not exist in memory: {}", module, module_addr);
+                        objects.insert(name.to_string(), pyobject_addr);
                     }
                 }
             },
-            None => {
-                panic!("Module does not exist: {}", module);
+            _ => {
+                panic!("Module name {} was found but it's not actually a module", module);
             }
         }
     }
 
-    pub fn find_module(&self, module: &str) ->Option<&mut PyObject> {
-        return self.modules.borrow().get(module).and_then(|v| 
-            self.get_pyobj_byaddr(*v)
-        );
+    pub fn find_module(&self, module: &str) -> &PyObject {
+        let module_addr = self.modules.get(module).unwrap();
+        return self.get_pyobj_byaddr(*module_addr)
     }
 
     pub fn find_in_module(&self, module: &str, name: &str) -> Option<MemoryAddress> {
-        return self.find_module(module).and_then(|obj|
-            match &obj.structure {
-                PyObjectStructure::Module{name: _, objects} => objects.get(name).map(|addr| *addr), 
-                _ => panic!("Object is not module: {:?}", obj.structure)
-            }
-        )
+        let module_pyobj = self.find_module(module);
+        match &module_pyobj.structure {
+            PyObjectStructure::Module{name: _, objects} => objects.get(name).map(|addr| *addr), 
+            _ => panic!("Object is not module: {:?}", module_pyobj.structure)
+        }
     }
 
-    pub fn get_pyobj_byaddr(&self, addr: MemoryAddress) -> Option<&mut PyObject> {
-        return self.memory.get(addr).downcast_mut::<PyObject>();
+    pub fn get_pyobj_byaddr(&self, addr: MemoryAddress) -> &PyObject {
+        return self.memory.get(addr);
     }
 
-    pub fn increase_refcount(&self, addr: MemoryAddress) {
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+    pub fn get_pyobj_byaddr_mut(&mut self, addr: MemoryAddress) -> &mut PyObject {
+        return self.memory.get_mut(addr);
+    }
+
+    pub fn increase_refcount(&mut self, addr: MemoryAddress) {
+        let pyobj = self.get_pyobj_byaddr_mut(addr);
         if let PyObjectStructure::Object {raw_data: _, refcount} = &mut pyobj.structure {
             *refcount = *refcount + 1;
         }
     }
 
-    pub fn decrease_refcount(&self, addr: MemoryAddress) {
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
-        if let PyObjectStructure::Object {raw_data, refcount} = &mut pyobj.structure {
+    pub fn decrease_refcount(&mut self, addr: MemoryAddress) {
+        let pyobj = self.get_pyobj_byaddr_mut(addr);
+        if let PyObjectStructure::Object {raw_data:_, refcount} = &mut pyobj.structure {
             if *refcount > 0 {
                 *refcount = *refcount - 1;
             }
             if *refcount <= 1 {
                 self.memory.deallocate(addr);
-                self.memory.deallocate(*raw_data);
             }
         }
     }
 
-    pub fn get_rawdata_byaddr(&self, addr: MemoryAddress) -> &mut Box<dyn Any> {
-        return self.memory.get(addr);
-    }
-
-    pub fn get_pyobj_type_byname(&self, module: &str, name: &str) -> Option<(&mut PyObject, MemoryAddress)> {
-        return self.find_in_module(module, name).and_then(|addr: MemoryAddress| {
-            self.get_pyobj_byaddr(addr).map(|pyobj| (pyobj, addr))
-        });
-    }
-    
     pub fn get_type_method_addr_byname(&self, type_addr: MemoryAddress, method_name: &str) -> Option<MemoryAddress> {
-        self.get_pyobj_byaddr(type_addr).and_then(|obj| -> Option<MemoryAddress> {
-            let result = match &obj.structure {
-                PyObjectStructure::Type {
-                    name: _,
-                    bounded_functions,
-                    unbounded_functions: _,
-                    supertype
-                } => {
-                    match bounded_functions.get(method_name) {
-                        Some(addr) => Some(*addr),
-                        None => match supertype {
-                            Some(supertype_addr) => self.get_type_method_addr_byname(*supertype_addr, method_name),
-                            None => None
-                        }
+        let pyobj = self.get_pyobj_byaddr(type_addr);
+        match &pyobj.structure {
+            PyObjectStructure::Type {
+                name: _,
+                bounded_functions,
+                unbounded_functions: _,
+                supertype
+            } => {
+                match bounded_functions.get(method_name) {
+                    Some(addr) => Some(*addr),
+                    None => match supertype {
+                        Some(supertype_addr) => self.get_type_method_addr_byname(*supertype_addr, method_name),
+                        None => None
                     }
-                },
-                _ => {
-                    None
                 }
-            };
-            return result;
-        })
+            },
+            _ => {
+                None
+            }
+        }
     }
 
  
     pub fn get_type_name(&self, addr: MemoryAddress) -> &str {
-        match self.get_pyobj_byaddr(addr) {
-            Some(obj) => match &obj.structure {
-                PyObjectStructure::Type {
-                    name,
-                    bounded_functions: _,
-                    unbounded_functions: _,
-                    supertype: _
-                } => {
-                    return &name;
-                }
-                _ => {
-                    panic!(
-                        "Attempt to get type name on a non-type object {:?}",
-                        obj.structure
-                    );
-                }
-            },
-            None => {
+        let pyobj = self.get_pyobj_byaddr(addr);
+        match &pyobj.structure {
+            PyObjectStructure::Type {
+                name,
+                bounded_functions: _,
+                unbounded_functions: _,
+                supertype: _
+            } => {
+                return &name;
+            }
+            _ => {
                 panic!(
-                    "Attempt to get type name on non-existing type object for address {}",
-                    addr
+                    "Attempt to get type name on a non-type object {:?}",
+                    pyobj.structure
                 );
             }
         }
     }
 
     pub fn get_pyobj_type_addr(&self, addr: MemoryAddress) -> MemoryAddress {
-        match self.get_pyobj_byaddr(addr) {
-            Some(obj) => {
-                return obj.type_addr;
-            }
-            None => {
-                panic!("Attempt to get type addr on non-existing object");
-            }
-        }
+        let pyobj = self.get_pyobj_byaddr(addr);
+        return pyobj.type_addr;
     }
 
     pub fn get_pyobj_type_name(&self, addr: MemoryAddress) -> &str {
@@ -532,31 +517,14 @@ impl Runtime {
         return self.get_type_name(type_addr);
     }
 
-    pub fn allocate_module_type_byname_raw<T: Any + Debug>(&self, module: &str, name: &str, raw_data: T) -> MemoryAddress {
-        match self.get_pyobj_type_byname(module, name) {
-            Some((_, addr)) => {
-                return self.allocate_type_byaddr_raw(addr, raw_data);
-            }
-            None => {
-                panic!("Type {} not found", name);
-            }
-        }
-    }
-
-    pub fn allocate_type_byname_raw(&self, name: &str, raw_data: Box<dyn Any>) -> MemoryAddress {
-        self.allocate_module_type_byname_raw(BUILTIN_MODULE, name, raw_data)
-    }
-
-    pub fn make_const(&self, addr: MemoryAddress) {
+    pub fn make_const(&mut self, addr: MemoryAddress) {
         self.memory.make_const(addr);
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
-        if let PyObjectStructure::Object{raw_data, refcount: _} = pyobj.structure {
-            self.memory.make_const(raw_data);
-        }
     }
+
+   
 
     pub fn allocate_type_byaddr_raw_struct(
-        &self,
+        &mut self,
         type_addr: MemoryAddress,
         structure: PyObjectStructure,
     ) -> MemoryAddress {
@@ -564,46 +532,50 @@ impl Runtime {
             type_addr,
             structure,
         };
-        return self.allocate_and_write(Box::new(obj));
+        return self.allocate_and_write(obj);
     }
 
-    pub fn allocate_type_byaddr_raw<T: Any + Debug>(
-        &self,
-        type_addr: MemoryAddress,
-        raw_data: T,
-    ) -> MemoryAddress {
-        let raw_data_ptr = self.allocate_and_write(raw_data);
+    pub fn allocate_builtin_type_byname_raw(
+        &mut self,
+        type_name: &str,
+        raw_data: BuiltInTypeData) -> MemoryAddress {
+        let type_addr = self.find_in_module(BUILTIN_MODULE, type_name).unwrap();
+        self.allocate_type_byaddr_raw(type_addr, raw_data)
+    }
 
+    pub fn allocate_type_byaddr_raw(
+        &mut self,
+        type_addr: MemoryAddress,
+        raw_data: BuiltInTypeData,
+    ) -> MemoryAddress {
         return self.allocate_type_byaddr_raw_struct(
             type_addr,
             PyObjectStructure::Object {
-                raw_data: raw_data_ptr,
+                raw_data,
                 refcount: 1
             },
         );
     }
 
-    pub fn create_callable_pyobj(&self, callable: PyCallable, name: Option<String>) -> MemoryAddress {
-        let raw_callable = self.allocate_and_write(Box::new(callable));
-
+    pub fn create_callable_pyobj(&mut self, callable: PyCallable, name: Option<String>) -> MemoryAddress {
         self.allocate_type_byaddr_raw_struct(
             self.special_values[&SpecialValue::CallableType],
-            PyObjectStructure::Callable { code: raw_callable, name },
+            PyObjectStructure::NativeCallable { code: callable, name },
         )
     }
 
     pub fn register_bounded_func<F>(
-        &self, 
+        &mut self, 
         module_name: &str,
         type_name: &str,
         name: &str,
-        callable: F) where F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static {
+        callable: F) where F: Fn(&mut Runtime, CallParams) -> MemoryAddress + 'static {
         let pycallable = PyCallable {
             code: Box::new(callable)
         };
         let func_addr = self.create_callable_pyobj(pycallable, Some(name.to_string()));
         let module = self.find_in_module(module_name, type_name).unwrap();
-        let pyobj = self.get_pyobj_byaddr(module).unwrap();
+        let pyobj = self.get_pyobj_byaddr_mut(module);
         if let PyObjectStructure::Type{ name: _, bounded_functions, unbounded_functions: _, supertype: _ } = &mut pyobj.structure {
             bounded_functions.insert(name.to_string(), func_addr);
         } else {
@@ -611,25 +583,14 @@ impl Runtime {
         }
     }
 
-    pub fn get_raw_data_of_pyobj<T>(&self, addr: MemoryAddress) -> &T
-    where
-        T: 'static,
-    {
-        self.get_raw_data_of_pyobj_opt(addr).unwrap()
-    }
-
-    pub fn get_raw_data_of_pyobj_opt<T>(&self, addr: MemoryAddress) -> Option<&T>
-    where
-        T: 'static,
-    {
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+    pub fn get_raw_data_of_pyobj(&self, addr: MemoryAddress) -> &BuiltInTypeData {
+        let pyobj = self.get_pyobj_byaddr(addr);
         if let PyObjectStructure::Object {
             raw_data,
             refcount: _
         } = &pyobj.structure
         {
-            let rawdata = self.get_rawdata_byaddr(*raw_data);
-            return rawdata.downcast_ref::<T>();
+           return &raw_data;
         } else {
             panic!(
                 "get_raw_data_of_pyobj cannot be called on {:?}",
@@ -637,27 +598,34 @@ impl Runtime {
             )
         }
     }
+    
+    unsafe fn very_bad_function<T>(reference: &T) -> &mut T {
+        let const_ptr = reference as *const T;
+        let mut_ptr = const_ptr as *mut T;
+        &mut *mut_ptr
+    }
 
     pub fn callable_call(
-        &self,
+        &mut self,
         callable_addr: MemoryAddress,
         call_params: CallParams,
     ) -> MemoryAddress {
-        let callable_pyobj = self.get_pyobj_byaddr(callable_addr).unwrap();
+        //ToDo - FAKE SAFETY: I know this is *bad*, but the fields I use here (mostly native callable code) are *not* changed
+        //during normal execution of the program. For now this is unsafe but *very* practical.
+        //Maybe I should store the callables elsewhere, so that I start the code borrow outside of the Runtime borrow? 
 
-        if let PyObjectStructure::Callable { code, name: _ } = &callable_pyobj.structure {
-            let raw_callable = self.get_rawdata_byaddr(*code);
-            let pyobj_callable = raw_callable
-                .downcast_ref::<PyCallable>()
-                .unwrap();
-            return (pyobj_callable.code)(self, call_params);
+        let call_self =unsafe { Runtime::very_bad_function(self) };
+        let callable_pyobj = self.get_pyobj_byaddr(callable_addr);
+
+        if let PyObjectStructure::NativeCallable { code, name: _ } = &callable_pyobj.structure {
+            return (code.code)(call_self, call_params);
         } else {
             panic!("Object is not callable: {:?}", callable_pyobj);
         }
     }
 
-    pub fn call_method(&self, addr: MemoryAddress, method_name: &str, params: &[MemoryAddress]) -> Option<MemoryAddress> {
-        let pyobj = self.get_pyobj_byaddr(addr).unwrap();
+    pub fn call_method(&mut self, addr: MemoryAddress, method_name: &str, params: &[MemoryAddress]) -> Option<MemoryAddress> {
+        let pyobj = self.get_pyobj_byaddr(addr);
         self.get_type_method_addr_byname(pyobj.type_addr, method_name).map(move |method_addr| {
             self.callable_call(method_addr, CallParams {
                 bound_pyobj: Some(addr),
@@ -669,14 +637,14 @@ impl Runtime {
     }
 
     pub fn bounded_function_call_byaddr(
-        &self,
+        &mut self,
         bound_obj_addr: MemoryAddress,
         method_addr: MemoryAddress,
         params: &[MemoryAddress],
     ) -> MemoryAddress {
-        let pyobj: &PyObject = self.get_pyobj_byaddr(bound_obj_addr).unwrap();
+        let pyobj = self.get_pyobj_byaddr(bound_obj_addr);
         let type_addr = pyobj.type_addr;
-        let type_pyobj = self.get_pyobj_byaddr(type_addr).unwrap();
+        let type_pyobj = self.get_pyobj_byaddr(type_addr);
 
         //type_pyobj must be a type
         if let PyObjectStructure::Type {
@@ -686,31 +654,22 @@ impl Runtime {
             supertype: _
         } = &type_pyobj.structure
         {
-            let bounded_method = self.get_pyobj_byaddr(method_addr);
-            if let Some(bounded_method_pyobj) = bounded_method {
-
-                match &bounded_method_pyobj.structure {
-                    PyObjectStructure::Callable{code: _, name} => {
-                        let call_params = CallParams {
-                            bound_pyobj: Some(bound_obj_addr),
-                            func_address: method_addr,
-                            func_name: match name {
-                                Some(fname) => Some(fname),
-                                None => None
-                            },
-                            params: params,
-                        };
-        
-                        return self.callable_call(method_addr, call_params);
-                    },
-                    _ => {
-                        panic!("Not a method at addr: {}", method_addr);
+            let bounded_method_pyobj = self.get_pyobj_byaddr(method_addr);
+            let call_params = match &bounded_method_pyobj.structure {
+                PyObjectStructure::NativeCallable{code: _, name:_} => {
+                    CallParams {
+                        bound_pyobj: Some(bound_obj_addr),
+                        func_address: method_addr,
+                        func_name: None,
+                        params: params,
                     }
-                };
-                
-            } else {
-                panic!("Method not found at addr: {}", method_addr);
-            }
+                },
+                _ => {
+                    panic!("Not a method at addr: {}", method_addr);
+                }
+            };
+
+            return self.callable_call(method_addr, call_params);
         } else {
             panic!(
                 "FATAL ERROR: pyobj addr {} was supposed to be a type, but it's something else: {:?}",
@@ -720,89 +679,91 @@ impl Runtime {
     }
 
     pub fn unbounded_function_call_byaddr(
-        &self,
+        &mut self,
         function_addr: MemoryAddress,
         params: &[MemoryAddress],
     ) -> MemoryAddress {
-        let unbounded_func = self.get_pyobj_byaddr(function_addr);
-        if let Some(unbounded_func_pyobj) = unbounded_func {
-            return match &unbounded_func_pyobj.structure {
-                PyObjectStructure::Callable{code: _, name} => {
-                    let call_params = CallParams {
-                        bound_pyobj: None,
-                        func_address: function_addr,
-                        func_name: match name {
-                            Some(fname) => Some(fname),
-                            None => None
-                        },
-                        params,
-                    };
-
-                    self.callable_call(function_addr, call_params)
-                },
-                _ => {
-                    panic!("Not a function at addr: {}", function_addr);
+        let unbounded_func_pyobj = self.get_pyobj_byaddr(function_addr);
+    
+        let call_params = match &unbounded_func_pyobj.structure {
+            PyObjectStructure::NativeCallable {code: _, name: _} => {
+                CallParams {
+                    bound_pyobj: None,
+                    func_address: function_addr,
+                    func_name: None,
+                    params,
                 }
+            },
+            _ => {
+                panic!("Not a function at addr: {}", function_addr);
             }
-        } else {
-            panic!("Function not found at addr: {}", function_addr);
-        }
+        };
+
+        self.callable_call(function_addr, call_params)
     }
 
 
-    pub fn new_stack_frame(&self) {
-        let mut current_stack = self.stack.borrow_mut();
-        current_stack.push(StackFrame {
-            values: HashMap::new(),
+    pub fn new_stack_frame(&mut self) {
+        self.stack.push(StackFrame {
+            values: vec![],
             stack: vec![],
             current_function: 0
         })
     }
 
-    pub fn pop_stack(&self) -> MemoryAddress {
-        match self.stack.borrow_mut().last_mut().unwrap().stack.pop() {
+    pub fn pop_stack(&mut self) -> MemoryAddress {
+        match self.stack.last_mut().unwrap().stack.pop() {
             Some(addr) => addr,
             None => panic!("Attempt to pop on empty stack!")
         }
     }
 
     pub fn top_stack(&self) -> MemoryAddress {
-        match self.stack.borrow().last().unwrap().stack.last() {
+        match self.stack.last().unwrap().stack.last() {
             Some(addr) => *addr,
             None => panic!("Attempt to get top of stack on empty stack!")
         }
     }
 
-    pub fn push_onto_stack(&self, value: MemoryAddress) {
-        self.stack.borrow_mut().last_mut().unwrap().stack.push(value)
+    pub fn push_onto_stack(&mut self, value: MemoryAddress) {
+        self.stack.last_mut().unwrap().stack.push(value)
     }
 
-    pub fn pop_stack_frame(&self) -> StackFrame {
-        let mut current_stack = self.stack.borrow_mut();
-        match current_stack.pop() {
+    pub fn pop_stack_frame(&mut self) {
+        match self.stack.pop() {
             Some(stack_frame) => {
                 for addr in stack_frame.stack.iter() {
                     self.decrease_refcount(*addr)
                 }
-                stack_frame
             },
             None => panic!("Attempt to pop on empty stack frames!")
         }
     }
 
-    pub fn bind_local(&self, name: &str, addr: MemoryAddress) {
-        let mut current_stack = self.stack.borrow_mut();
-        let current_frame = current_stack.last_mut().unwrap();
-        current_frame.values.insert(name.to_string(), addr);
+    pub fn bind_local(&mut self, name: usize, addr: MemoryAddress) {
+        let current_frame = self.stack.last_mut().unwrap();
+        
+        //@Todo horrible stuff here
+        if current_frame.values.len() == name {
+            current_frame.values.push(addr);
+        }
+        else if current_frame.values.len() > name {
+            current_frame.values[name] = addr
+        }
+        else if current_frame.values.len() < name {
+            while current_frame.values.len() < name {
+                current_frame.values.push(0);
+            }
+            current_frame.values.push(addr);
+        }
     }
   
-    pub fn get_local(&self, name: &str) -> Option<MemoryAddress> {
-        let mut current_stack = self.stack.borrow_mut();
-        let current_frame = current_stack.last_mut().unwrap();
+    pub fn get_local(&mut self, name: usize) -> Option<MemoryAddress> {
+        let current_frame = self.stack.last_mut().unwrap();
         current_frame.values.get(name).map(|a| *a)
     }
 
-    pub fn allocate_and_write<'a, T: Any + Debug>(&'a self, data: T) -> MemoryAddress {
+    pub fn allocate_and_write(&mut self, data: PyObject) -> MemoryAddress {
         self.memory.allocate_and_write(data)
     }
 
@@ -841,30 +802,30 @@ mod tests {
     fn simply_instantiate_int() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let pyobj_int_addr = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
-        let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
-        assert_eq!(1, *result_value);
+        let pyobj_int_addr = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
+        let result_value = interpreter.get_raw_data_of_pyobj(pyobj_int_addr).take_int();
+        assert_eq!(1, result_value);
     }
 
     #[test]
     fn simply_instantiate_bool() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let pyobj_int_addr = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
-        let result_value = interpreter.get_raw_data_of_pyobj::<i128>(pyobj_int_addr);
-        assert_eq!(1, *result_value);
+        let pyobj_int_addr = interpreter.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1));
+        let result_value = interpreter.get_raw_data_of_pyobj(pyobj_int_addr).take_int();
+        assert_eq!(1, result_value);
     }
 
     #[test]
     fn call_int_add_int() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
-        let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__add__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
         assert_eq!(result_value, 4);
     }
@@ -873,12 +834,12 @@ mod tests {
     fn call_bool_add_int() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("bool", Box::new(1 as i128));
-        let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__add__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
         assert_eq!(result_value, 4);
     }
@@ -887,28 +848,28 @@ mod tests {
     fn call_int_add_float() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
-        let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.5)));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__add__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
-        assert_eq!(result_value, 4.5 as f64);
+        assert_eq!(result_value, 4.5);
     }
 
     #[test]
     fn call_float_add_int() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.5 as f64));
-        let number2 = interpreter.allocate_type_byname_raw("int", Box::new(1 as i128));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.5)));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__add__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
-        assert_eq!(result_value, 4.5 as f64);
+        assert_eq!(result_value, 4.5);
     }
 
 
@@ -916,55 +877,55 @@ mod tests {
     fn call_float_add_float() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("float", Box::new(3.4 as f64));
-        let number2 = interpreter.allocate_type_byname_raw("float", Box::new(1.1 as f64));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.4)));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(1.1)));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__add__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
-        assert_eq!(result_value, 4.5 as f64);
+        assert_eq!(result_value, 4.5);
     }
 
     #[test]
     fn call_float_mul_float() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("float", Box::new(2.0 as f64));
-        let number2 = interpreter.allocate_type_byname_raw("float", Box::new(3.0 as f64));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(2.0)));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.0)));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__mul__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<f64>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
-        assert_eq!(result_value, 6.0 as f64);
+        assert_eq!(result_value, 6.0);
     }
 
     #[test]
     fn call_int_mul_int() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number1 = interpreter.allocate_type_byname_raw("int", Box::new(2 as i128));
-        let number2 = interpreter.allocate_type_byname_raw("int", Box::new(3 as i128));
+        let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(2));
+        let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
 
         //number1.__add__(number2)
         let result = interpreter.call_method(number1, "__mul__", &[number2]).unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(result);
+        let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
-        assert_eq!(result_value, 6 as i128);
+        assert_eq!(result_value, 6);
     }
 
     #[test]
     fn bind_local_test() {
         let mut interpreter = Runtime::new();
         register_builtins(&mut interpreter);
-        let number = interpreter.allocate_type_byname_raw("int", Box::new(17 as i128));
-        interpreter.bind_local("x", number);
+        let number = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(17));
+        interpreter.bind_local(0, number);
 
-        let addr_local = interpreter.get_local("x").unwrap();
-        let result_value = *interpreter.get_raw_data_of_pyobj::<i128>(addr_local);
+        let addr_local = interpreter.get_local(0).unwrap();
+        let result_value = interpreter.get_raw_data_of_pyobj(addr_local).take_int();
 
-        assert_eq!(result_value, 17 as i128);
+        assert_eq!(result_value, 17);
     }
 
  

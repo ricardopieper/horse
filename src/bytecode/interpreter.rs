@@ -1,8 +1,9 @@
 use crate::bytecode::program::*;
 use crate::runtime::*;
+use smallvec::{SmallVec, smallvec};
 
-pub fn handle_method_call(runtime: &Runtime, number_args: usize) {
-    let mut temp_stack = vec![];
+pub fn handle_method_call(runtime: &mut Runtime, number_args: usize) {
+    let mut temp_stack: SmallVec<[MemoryAddress; 2]> = smallvec![];
     for _ in 0..number_args {
         temp_stack.push(runtime.pop_stack());
     }
@@ -30,7 +31,7 @@ pub fn handle_method_call(runtime: &Runtime, number_args: usize) {
     runtime.push_onto_stack(new_obj);
 }
 
-pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
+pub fn handle_function_call(runtime: &mut Runtime, number_args: usize) {
     let mut temp_stack = vec![];
     for _ in 0..number_args {
         temp_stack.push(runtime.pop_stack());
@@ -55,16 +56,16 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
     runtime.push_onto_stack(new_obj);
 }
 
-pub fn handle_load_const(runtime: &Runtime, index: usize) {
+pub fn handle_load_const(runtime: &mut Runtime, index: usize) {
     let memory_address = runtime.get_const(index);
     runtime.push_onto_stack(memory_address);
 }
 
-pub fn handle_store_const(runtime: &Runtime, const_data: &Const) {
+pub fn handle_store_const(runtime: &mut Runtime, const_data: &Const) {
     let loaded_addr = match const_data {
-        Const::Integer(i) => runtime.allocate_type_byname_raw("int", Box::new(*i)),
-        Const::Float(f) => runtime.allocate_type_byname_raw("float", Box::new(f.0)),
-        Const::String(s) => runtime.allocate_type_byname_raw("str", Box::new(s.clone())),
+        Const::Integer(i) => runtime.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(*i)),
+        Const::Float(f) => runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(*f)),
+        Const::String(s) => runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(s.clone())),
         Const::Boolean(b) => {
             if *b {
                 runtime.builtin_type_addrs.true_val
@@ -77,10 +78,9 @@ pub fn handle_store_const(runtime: &Runtime, const_data: &Const) {
     runtime.store_const(loaded_addr);
 }
 
-pub fn handle_load_method(runtime: &Runtime, method_name: &str) {
-    let stack_top = runtime.pop_stack();
-    let pyobj = runtime.get_pyobj_byaddr(stack_top).unwrap();
-    runtime.push_onto_stack(stack_top);
+pub fn handle_load_method(runtime: &mut Runtime, method_name: &str) {
+    let stack_top = runtime.top_stack();
+    let pyobj = runtime.get_pyobj_byaddr(stack_top);
 
     let type_addr = pyobj.type_addr;
     let obj = runtime.get_type_method_addr_byname(type_addr, method_name);
@@ -93,15 +93,15 @@ pub fn handle_load_method(runtime: &Runtime, method_name: &str) {
     }
 }
 
-pub fn handle_load_function(runtime: &Runtime, method_name: &str) {
+pub fn handle_load_function(runtime: &mut Runtime, method_name: &str) {
     let obj = runtime.find_in_module(BUILTIN_MODULE, method_name);
 
     match obj {
         None => panic!("module has no object/function {}", method_name),
         Some(addr) => {
-            let pyobj = runtime.get_pyobj_byaddr(addr).unwrap();
-            match &pyobj.structure {
-                PyObjectStructure::Callable { code: _, name: _ } => runtime.push_onto_stack(addr),
+            let pyobj = runtime.get_pyobj_byaddr(addr);
+            let addr = match &pyobj.structure {
+                PyObjectStructure::NativeCallable { code: _, name: _ } => addr,
                 PyObjectStructure::Type {
                     name: _,
                     bounded_functions: _,
@@ -111,15 +111,16 @@ pub fn handle_load_function(runtime: &Runtime, method_name: &str) {
                     let new = functions
                         .get("__new__")
                         .expect("Type has no __new__ function");
-                    runtime.push_onto_stack(*new);
+                    *new
                 }
                 _ => panic!("not callable: {}", method_name),
-            }
+            };
+            runtime.push_onto_stack(addr);
         }
     }
 }
 
-pub fn handle_load_name(runtime: &Runtime, name: &str) {
+pub fn handle_load_name(runtime: &mut Runtime, name: usize) {
     let obj = runtime.get_local(name);
 
     match obj {
@@ -130,7 +131,7 @@ pub fn handle_load_name(runtime: &Runtime, name: &str) {
     }
 }
 
-pub fn handle_store_name(runtime: &Runtime, name: &str) {
+pub fn handle_store_name(runtime: &mut Runtime, name: usize) {
     if let Some(addr) = runtime.get_local(name) {
         runtime.decrease_refcount(addr);
     }
@@ -140,10 +141,10 @@ pub fn handle_store_name(runtime: &Runtime, name: &str) {
 }
 
 //returns true if jumped
-pub fn handle_jump_if_false_pop(runtime: &Runtime, destination: usize) -> bool {
+pub fn handle_jump_if_false_pop(runtime: &mut Runtime, destination: usize) -> bool {
     let stack_top = runtime.pop_stack();
     let as_boolean = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
-    let raw_value: i128 = *runtime.get_raw_data_of_pyobj::<i128>(as_boolean);
+    let raw_value = runtime.get_raw_data_of_pyobj(as_boolean).take_int();
     let result = if raw_value == 0 {
         runtime.set_pc(destination);
         true
@@ -161,11 +162,11 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 }
 
 
-pub fn execute_program(runtime: &Runtime, program: Program) {
+pub fn execute_program(runtime: &mut Runtime, program: Program) {
     #[cfg(test)]
     {
         println!("Executing program");
-        for (index, inst) in program.data.iter().enumerate() {
+        for (index, inst) in program.code.iter().enumerate() {
             println!("{} - {:?}", index, inst);
         }
     }
@@ -181,8 +182,8 @@ pub fn execute_program(runtime: &Runtime, program: Program) {
         }
 
         let mut advance_pc = true;
-
-        match program.code.get(runtime.get_pc()).unwrap() {
+        let instruction = program.code.get(runtime.get_pc()).unwrap();
+        match instruction {
             Instruction::CallMethod { number_arguments } => {
                 handle_method_call(runtime, *number_arguments)
             }
@@ -192,15 +193,17 @@ pub fn execute_program(runtime: &Runtime, program: Program) {
             Instruction::CallFunction { number_arguments } => {
                 handle_function_call(runtime, *number_arguments)
             }
-            Instruction::LoadName(name) => handle_load_name(runtime, name.as_str()),
-            Instruction::StoreName(name) => handle_store_name(runtime, name.as_str()),
+            Instruction::LoadName(name) 
+                => handle_load_name(runtime, *name),
+            Instruction::StoreName(name) 
+                => handle_store_name(runtime, *name),
             Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
             Instruction::JumpUnconditional(destination) =>{
                 handle_jump_unconditional(runtime, *destination);
                 advance_pc = false;
             },
-            Instruction::UnresolvedBreak => {
-                panic!("Unsupported instruction: UnresolvedBreak");
+            _ => {
+                panic!("Unsupported instruction: {}", );
             }
         }
         if advance_pc {

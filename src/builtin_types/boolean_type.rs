@@ -1,157 +1,149 @@
 use crate::runtime::*;
+use crate::float::Float;
 
 const AND_STR : &'static str = "__and__";
 const OR_STR : &'static str = "__or__";
 const XOR_STR : &'static str = "__xor__";
 
 
-fn and_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn and_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     
-    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
     let other_type_addr = runtime.get_pyobj_type_addr(params.params[0]);     
-    let boolean_type =    runtime.builtin_type_addrs.boolean;  
-    match other_type_addr {
-        boolean_type => {
-            let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
+    let boolean_type = runtime.builtin_type_addrs.boolean; 
+    if other_type_addr == boolean_type {
+        let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
 
-            let self_as_rust_boolean = if *self_data == 0 {false} else {true};
-            let other_as_rust_boolean = if *other_int == 0 {false} else {true};
-            if self_as_rust_boolean && other_as_rust_boolean {
-                return runtime.builtin_type_addrs.true_val;
-            } else {
-                return runtime.builtin_type_addrs.false_val;
-            }
-        },
-        _ => {
-            
-            if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
-                //call the method again, but the argument is another boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), AND_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.params[0];
-                } else {
-                    return params.bound_pyobj.unwrap()
-                }
-            }
-
-            if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
-                //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), AND_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.params[0];
-                } else {
-                    return params.bound_pyobj.unwrap()
-                }
-            }
-            
-            return runtime.special_values[&SpecialValue::NotImplementedValue];
+        let self_as_rust_boolean = if self_data == 0 {false} else {true};
+        let other_as_rust_boolean = if other_int == 0 {false} else {true};
+        if self_as_rust_boolean && other_as_rust_boolean {
+            return runtime.builtin_type_addrs.true_val;
+        } else {
+            return runtime.builtin_type_addrs.false_val;
         }
-    };
+    } else {
+        if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
+            //call the method again, but the argument is another boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), AND_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.params[0];
+            } else {
+                return params.bound_pyobj.unwrap()
+            }
+        }
+
+        if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
+            //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), AND_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.params[0];
+            } else {
+                return params.bound_pyobj.unwrap()
+            }
+        }
+        
+        return runtime.special_values[&SpecialValue::NotImplementedValue];
+    }
 }
 
-fn or_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn or_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     
-    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    let other_type_name = runtime.get_pyobj_type_addr(params.params[0]);          
-    let boolean_type = runtime.builtin_type_addrs.boolean;    
-    match other_type_name {
-        boolean_type => {
-            let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
+    let other_type_addr = runtime.get_pyobj_type_addr(params.params[0]);          
+    let boolean_type = runtime.builtin_type_addrs.boolean;   
+    if other_type_addr == boolean_type {
+        let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
 
-            let self_as_rust_boolean = if *self_data == 0 {false} else {true};
-            let other_as_rust_boolean = if *other_int == 0 {false} else {true};
-            if self_as_rust_boolean || other_as_rust_boolean {
-                return runtime.builtin_type_addrs.true_val;
-            } else {
-                return runtime.builtin_type_addrs.false_val;
-            }
-        },
-        _ => {
-            
-            if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
-                //call the method again, but the argument is another boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), OR_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.bound_pyobj.unwrap();
-                } else {
-                    return params.params[0];
-                }
-            }
-
-            if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
-                //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), OR_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.bound_pyobj.unwrap();
-                } else {
-                    return params.params[0];
-                }
-            }
-            
-            
-            return runtime.special_values[&SpecialValue::NotImplementedValue];
+        let self_as_rust_boolean = if self_data == 0 {false} else {true};
+        let other_as_rust_boolean = if other_int == 0 {false} else {true};
+        if self_as_rust_boolean || other_as_rust_boolean {
+            return runtime.builtin_type_addrs.true_val;
+        } else {
+            return runtime.builtin_type_addrs.false_val;
         }
-    };
+    } else {
+        
+        if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
+            //call the method again, but the argument is another boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), OR_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.bound_pyobj.unwrap();
+            } else {
+                return params.params[0];
+            }
+        }
+
+        if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
+            //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), OR_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.bound_pyobj.unwrap();
+            } else {
+                return params.params[0];
+            }
+        }
+        
+        
+        return runtime.special_values[&SpecialValue::NotImplementedValue];
+    }
        
 }
 
-fn xor_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn xor_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     
-    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    let other_type_name = runtime.get_pyobj_type_addr(params.params[0]);      
-    let boolean_type = runtime.builtin_type_addrs.boolean;          
-    match other_type_name {
-        boolean_type => {
-            let other_int = runtime.get_raw_data_of_pyobj::<i128>(params.params[0]);
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
+    let other_type_addr = runtime.get_pyobj_type_addr(params.params[0]);      
+    let boolean_type = runtime.builtin_type_addrs.boolean;   
+    if other_type_addr == boolean_type {
+        let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
 
-            let self_as_rust_boolean = if *self_data == 0 {false} else {true};
-            let other_as_rust_boolean = if *other_int == 0 {false} else {true};
-            if self_as_rust_boolean ^ other_as_rust_boolean {
-                return runtime.builtin_type_addrs.true_val;
-            } else {
-                return runtime.builtin_type_addrs.false_val;
-            }
-        },
-        _ => {
-            
-            if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
-                //call the method again, but the argument is another boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), XOR_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.bound_pyobj.unwrap();
-                } else {
-                    return params.params[0];
-                }
-            }
-
-            if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
-                //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
-                let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), XOR_STR, &[addr]).unwrap();
-                let bool_result = runtime.get_raw_data_of_pyobj::<i128>(bool_value_addr);
-                if *bool_result == 1 {
-                    return params.bound_pyobj.unwrap();
-                } else {
-                    return params.params[0];
-                }
-            }
-            
-            
-            return runtime.special_values[&SpecialValue::NotImplementedValue];
+        let self_as_rust_boolean = if self_data == 0 {false} else {true};
+        let other_as_rust_boolean = if other_int == 0 {false} else {true};
+        if self_as_rust_boolean ^ other_as_rust_boolean {
+            return runtime.builtin_type_addrs.true_val;
+        } else {
+            return runtime.builtin_type_addrs.false_val;
         }
-    };
+    } else {
+        
+        if let Some(addr) = runtime.call_method(params.params[0], "__bool__", &[]) {
+            //call the method again, but the argument is another boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), XOR_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.bound_pyobj.unwrap();
+            } else {
+                return params.params[0];
+            }
+        }
+
+        if let Some(addr) = runtime.call_method(params.params[0], "__len__", &[]) {
+            //call the method again, but the argument is the i128 __len__ value, which will be converted to boolean
+            let bool_value_addr = runtime.call_method(params.bound_pyobj.unwrap(), XOR_STR, &[addr]).unwrap();
+            let bool_result = runtime.get_raw_data_of_pyobj(bool_value_addr).take_int();
+            if bool_result == 1 {
+                return params.bound_pyobj.unwrap();
+            } else {
+                return params.params[0];
+            }
+        }
+        
+        
+        return runtime.special_values[&SpecialValue::NotImplementedValue];
+    }
+    
 }
 
-fn not_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn not_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
 
     if self_data == 0 {
         return runtime.builtin_type_addrs.true_val;
@@ -160,49 +152,49 @@ fn not_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
     if self_data == 0 {
-        runtime.allocate_type_byname_raw("str", Box::new(String::from("False")))
+        runtime.allocate_builtin_type_byname_raw("str",  BuiltInTypeData::String(String::from("False")))
     } else {
-        runtime.allocate_type_byname_raw("str", Box::new(String::from("True")))
+        runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("True")))
     }
 }
 
-fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = *runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
     if self_data == 0 {
-        runtime.allocate_type_byname_raw("str", Box::new(String::from("False")))
+        runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("False")))
     } else {
-        runtime.allocate_type_byname_raw("str", Box::new(String::from("True")))
+        runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("True")))
     }
 }
 
-fn to_boolean(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_boolean(_runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     //no-op
     return params.bound_pyobj.unwrap();
 }
 
-fn to_int(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    if *self_data == 0 {
-        runtime.allocate_type_byname_raw("int", Box::new(0 as i128))
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
+    if self_data == 0 {
+        runtime.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(0 as i128))
     } else {
-        runtime.allocate_type_byname_raw("int", Box::new(1 as i128))
+        runtime.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1 as i128))
     }
 }
 
 
-fn to_float(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+fn to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = runtime.get_raw_data_of_pyobj::<i128>(params.bound_pyobj.unwrap());
-    if *self_data == 0 {
-        runtime.allocate_type_byname_raw("float", Box::new(0.0 as f64))
+    let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
+    if self_data == 0 {
+        runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(0.0 as f64)))
     } else {
-        runtime.allocate_type_byname_raw("float", Box::new(1.0 as f64))
+        runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(1.0 as f64)))
     }
 }
 
@@ -223,8 +215,8 @@ pub fn register_boolean_type(runtime: &mut Runtime) -> MemoryAddress {
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__int__", to_int);
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__float__", to_float);
     
-    let true_value = runtime.allocate_type_byname_raw("bool", Box::new(1 as i128));
-    let false_value = runtime.allocate_type_byname_raw("bool", Box::new(0 as i128));
+    let true_value = runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1 as i128));
+    let false_value = runtime.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(0 as i128));
 
     runtime.builtin_type_addrs.true_val = true_value;
     runtime.builtin_type_addrs.false_val = false_value;

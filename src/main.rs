@@ -22,7 +22,7 @@ fn main() {
         let tokens = lexer::tokenize(input.as_str());
         let ast = parser::parse_ast(tokens.unwrap());
         let program =  bytecode::compiler::compile(ast);
-        bytecode::interpreter::execute_program(&runtime, program);
+        bytecode::interpreter::execute_program(&mut runtime, program);
 
         /*
         let memory = runtime.memory.memory.into_inner();
@@ -70,7 +70,7 @@ fn main() {
                 let tokens = lexer::tokenize(input.as_str());
                 let ast = parser::parse_ast(tokens.unwrap());
                 let program =  bytecode::compiler::compile(ast);
-                bytecode::interpreter::execute_program(&runtime, program);
+                bytecode::interpreter::execute_program(&mut runtime, program);
                 
                 let result_addr = runtime.top_stack();
                 
@@ -78,7 +78,7 @@ fn main() {
                 match result_string {
                     None => {},
                     Some(addr) => {
-                        let pyobj_str = runtime.get_raw_data_of_pyobj_opt::<String>(addr).unwrap();
+                        let pyobj_str = runtime.get_raw_data_of_pyobj(addr).take_string();
                         println!("{}", pyobj_str);
                     }
                 }
