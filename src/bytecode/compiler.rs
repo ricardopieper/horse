@@ -7,7 +7,7 @@ use std::collections::HashMap;
 fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
    let loadconst_idx = if !const_map.contains_key(&constval) {
         let len = const_map.len();
-        println!("Storing const {:?} with key {:?}", constval, len);
+        //println!("Storing const {:?} with key {:?}", constval, len);
         const_map.insert(constval, len);
         len
     } else {

@@ -74,7 +74,7 @@ fn main() {
                 
                 let result_addr = runtime.top_stack();
                 
-                let result_string = runtime.call_method(result_addr, "__repr__", vec![]);
+                let result_string = runtime.call_method(result_addr, "__repr__", &[]);
                 match result_string {
                     None => {},
                     Some(addr) => {

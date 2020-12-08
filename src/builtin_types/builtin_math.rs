@@ -4,7 +4,7 @@ fn create_function_1arg<FFloat>(runtime: & Runtime, name: &str,
     op_float: FFloat) -> MemoryAddress where FFloat: Fn(f64) -> f64 + 'static {
     let func = PyCallable {
         code: Box::new(move |runtime, params| -> MemoryAddress {
-            check_builtin_func_params!(params.func_name.unwrap().as_str(), 1, params.params.len());
+            check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
             let value_type_name = runtime.get_pyobj_type_name(params.params[0]);
             
             return match value_type_name {
@@ -30,7 +30,7 @@ fn create_function_2arg<FFloat>(runtime: & Runtime, name: &str,
     op_float: FFloat) -> MemoryAddress where FFloat: Fn(f64, f64) -> f64 + 'static {
     let func = PyCallable {
         code: Box::new(move |runtime, params| -> MemoryAddress {
-            check_builtin_func_params!(params.func_name.unwrap().as_str(), 2, params.params.len());
+            check_builtin_func_params!(params.func_name.unwrap(), 2, params.params.len());
           
             let float1 = runtime.get_raw_data_of_pyobj::<f64>(params.params[0]);
             let float2 = runtime.get_raw_data_of_pyobj::<f64>(params.params[1]);

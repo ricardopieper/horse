@@ -67,9 +67,9 @@ pub fn handle_store_const(runtime: &Runtime, const_data: &Const) {
         Const::String(s) => runtime.allocate_type_byname_raw("str", Box::new(s.clone())),
         Const::Boolean(b) => {
             if *b {
-                runtime.special_values[&SpecialValue::TrueValue]
+                runtime.builtin_type_addrs.true_val
             } else {
-                runtime.special_values[&SpecialValue::FalseValue]
+                runtime.builtin_type_addrs.false_val
             }
         }
     };
@@ -142,7 +142,7 @@ pub fn handle_store_name(runtime: &Runtime, name: &str) {
 //returns true if jumped
 pub fn handle_jump_if_false_pop(runtime: &Runtime, destination: usize) -> bool {
     let stack_top = runtime.pop_stack();
-    let as_boolean = runtime.call_method(stack_top, "__bool__", vec![]).unwrap();
+    let as_boolean = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
     let raw_value: i128 = *runtime.get_raw_data_of_pyobj::<i128>(as_boolean);
     let result = if raw_value == 0 {
         runtime.set_pc(destination);
