@@ -20,10 +20,18 @@ pub enum Instruction {
     CallFunction { number_arguments: usize },
     JumpIfFalseAndPopStack(usize),
     JumpUnconditional(usize),
+    BinaryAdd,
     UnresolvedBreak
 }
 
 pub struct Program {
+    //bytecode compatibility version
+    //needs to recompile if bytecode has different version
+    //bytecode depends on where things are at runtime, 
+    //it's not very good right now
+    pub version: u64,
+    //constant values, bytecode refers to consts using indexes on data
     pub data: Vec<Const>,
+    //the bytecode itself
     pub code: Vec<Instruction>
 }

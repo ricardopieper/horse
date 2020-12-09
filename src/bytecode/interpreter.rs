@@ -1,5 +1,7 @@
 use crate::bytecode::program::*;
 use crate::runtime::*;
+use crate::float::Float;
+
 use smallvec::{SmallVec, smallvec};
 
 pub fn handle_method_call(runtime: &mut Runtime, number_args: usize) {
@@ -78,6 +80,79 @@ pub fn handle_store_const(runtime: &mut Runtime, const_data: &Const) {
     runtime.store_const(loaded_addr);
 }
 
+//optimization: if binary add, then we check the TOS and TOS-1. If both are numeric, then 
+//we just do the operation here and now, very fast, without creating a new stack frame.
+//If both types are not numeric or not simple/common to be operated on, we just call __add__ on TOS-1 etc
+pub fn handle_binary_add(runtime: &mut Runtime) {
+    let tos = runtime.top_stack();
+    let tos_1 = runtime.get_stack_offset(-1);
+
+    let pyobj_tos = runtime.get_pyobj_byaddr(tos);
+    let pyobj_tos_1 = runtime.get_pyobj_byaddr(tos_1);
+
+    let result;
+    
+    if let PyObjectStructure::Object{ raw_data: raw_data_tos, refcount: _} = &pyobj_tos.structure {
+        if let PyObjectStructure::Object{ raw_data: raw_data_tos_1, refcount: _} = &pyobj_tos_1.structure {
+            match raw_data_tos {
+                BuiltInTypeData::Int(j) => {
+                    match raw_data_tos_1 {
+                        BuiltInTypeData::Int(i) => {
+                            result = Some(BuiltInTypeData::Int(j + i))
+                        }
+                        BuiltInTypeData::Float(f) => {
+                            result = Some(BuiltInTypeData::Float(Float(*j as f64 + f.0)))
+                        }
+                       _ => {
+                            result = None;
+                        }
+                    }
+                }
+                BuiltInTypeData::Float(j) => {
+                    match raw_data_tos_1 {
+                        BuiltInTypeData::Int(i) => {
+                            result = Some(BuiltInTypeData::Float(Float(j.0 + *i as f64)))
+                        }
+                        BuiltInTypeData::Float(f) => {
+                            result = Some(BuiltInTypeData::Float(Float( j.0 as f64 + f.0)))
+                        }
+                        _ => {
+                            result = None;
+                        }
+                    }
+                }
+                _ => {
+                    result = None;
+                }
+            }
+        } else {
+            result = None;
+        }
+    } else {
+        result = None;
+    }
+
+    if result.is_none() {
+        //TODO terrible
+        runtime.pop_stack();
+        runtime.pop_stack();
+        runtime.push_onto_stack(tos_1);
+        handle_load_method(runtime, "__add__");
+        runtime.push_onto_stack(tos);
+        handle_method_call(runtime, 1);
+    }
+    else {
+        let type_addr = match &result.as_ref().unwrap() {
+            BuiltInTypeData::Int(_) => runtime.builtin_type_addrs.int,
+            BuiltInTypeData::Float(_) => runtime.builtin_type_addrs.float,
+            _ => { panic!("unknown error") }
+        };
+
+        let addr = runtime.allocate_type_byaddr_raw(type_addr, result.unwrap());
+        runtime.push_onto_stack(addr);
+    }
+}
+
 pub fn handle_load_method(runtime: &mut Runtime, method_name: &str) {
     let stack_top = runtime.top_stack();
     let pyobj = runtime.get_pyobj_byaddr(stack_top);
@@ -104,8 +179,8 @@ pub fn handle_load_function(runtime: &mut Runtime, method_name: &str) {
                 PyObjectStructure::NativeCallable { code: _, name: _ } => addr,
                 PyObjectStructure::Type {
                     name: _,
-                    bounded_functions: _,
-                    unbounded_functions: functions,
+                    methods: _,
+                    functions,
                     supertype: _,
                 } => {
                     let new = functions
@@ -197,13 +272,14 @@ pub fn execute_program(runtime: &mut Runtime, program: Program) {
                 => handle_load_name(runtime, *name),
             Instruction::StoreName(name) 
                 => handle_store_name(runtime, *name),
-            Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
+            Instruction::BinaryAdd => handle_binary_add(runtime),
+                Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
             Instruction::JumpUnconditional(destination) =>{
                 handle_jump_unconditional(runtime, *destination);
                 advance_pc = false;
             },
             _ => {
-                panic!("Unsupported instruction: {}", );
+                panic!("Unsupported instruction: {:?}", instruction);
             }
         }
         if advance_pc {

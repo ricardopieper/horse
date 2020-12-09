@@ -1,6 +1,7 @@
 use crate::bytecode::program::*;
 use crate::lexer::*;
 use crate::parser::*;
+use crate::runtime::Runtime;
 
 use std::collections::HashMap;
 
@@ -19,6 +20,8 @@ fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> V
 
 fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
     match expr {
+        //TODO change Expr to Const(Const::Integer) so that it 
+        //becomes easier to do this const stuff
         Expr::IntegerValue(i) => {
             let constval = Const::Integer(i);
             return process_constval(constval, const_map);
@@ -35,12 +38,24 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             let constval = Const::String(s);
             return process_constval(constval, const_map);
         },
+        Expr::BinaryOperation(lhs, Operator::Plus, rhs) => {
+            let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
+            let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
+            let mut final_instructions = vec![];
+            
+            final_instructions.append(&mut lhs_program);
+            final_instructions.append(&mut rhs_program);
+            final_instructions.push(Instruction::BinaryAdd);
+
+            return final_instructions;
+        },
         Expr::BinaryOperation(lhs, op, rhs) => {
             let mut load_method: Vec<Instruction> = match op {
                 Operator::And => vec![Instruction::LoadMethod(String::from("__and__"))],
                 Operator::Or => vec![Instruction::LoadMethod(String::from("__or__"))],
                 Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
-                Operator::Plus => vec![Instruction::LoadMethod(String::from("__add__"))],
+                //Operator::Plus => vec![Instruction::LoadMethod(String::from("__add__"))],
+                //Operator::Plus => vec![Instruction::BinaryAdd],
                 Operator::Mod => vec![Instruction::LoadMethod(String::from("__mod__"))],
                 Operator::Minus => vec![Instruction::LoadMethod(String::from("__sub__"))],
                 Operator::Multiply => vec![Instruction::LoadMethod(String::from("__mul__"))],
@@ -115,12 +130,15 @@ struct ConstAndIndex {
     index: usize
 }
 
+
 pub fn compile(ast: Vec<AST>) -> Program {
     let mut const_values_and_indices = HashMap::new();
     let instructions = compile_ast(ast, 0, &mut const_values_and_indices);
 
     let mut names_indices = HashMap::new();
 
+    //@TODO make compiler phases, ex: compilation, resolve consts, resolve local stores 
+    //Find all variable stores and set slots for each one of them
     for instruction in instructions.iter() {
         if let Instruction::UnresolvedStoreName(name) = instruction {
             if !names_indices.contains_key(name) {
@@ -129,6 +147,8 @@ pub fn compile(ast: Vec<AST>) -> Program {
         }
     }
 
+    //Instead of storing values in string names (hashing strings is slooooooooooooooooow), store variables in
+    //integer slots 
     let new_instructions = instructions.iter().map(|instruction| {
         return if let Instruction::UnresolvedLoadName(name) = instruction {
             let idx = names_indices.get(&name).unwrap();
@@ -153,6 +173,7 @@ pub fn compile(ast: Vec<AST>) -> Program {
     vec_const.sort_unstable_by(|a, b| a.index.cmp(&b.index));
 
     Program {
+        version: 1,
         data: vec_const.into_iter().map(|x| x.constval).collect(),
         code: new_instructions
     }
@@ -264,7 +285,6 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
 mod tests {
     use super::*;
     use crate::builtin_types::*;
-    use crate::runtime::*;
     use crate::bytecode::interpreter;
 
     #[test]
@@ -282,7 +302,7 @@ while x < 10:
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile(expr);
+        let program = compile( expr);
         interpreter::execute_program(&mut runtime, program);
         let y_value = runtime.get_local(1).unwrap();
         let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
