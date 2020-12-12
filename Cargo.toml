@@ -9,5 +9,7 @@ edition = "2018"
 [dependencies]
 rustc_version_runtime = "0.2.0"
 rustyline = "6.3.0"
+smallvec = "1.5.1"
+
 [profile.release]
 debug = true
