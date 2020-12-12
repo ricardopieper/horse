@@ -200,14 +200,15 @@ impl Memory {
                         address
                     )
                 } else {
-                    if let PyObjectStructure::Object{raw_data, refcount: _} = &mut cell.data.as_mut().unwrap().structure {
+                    if let PyObjectStructure::Object{raw_data, refcount} = &mut cell.data.as_mut().unwrap().structure {
                         *raw_data = data;
+                        *refcount = 0;
                     } else {
                         cell.data = Some(PyObject {
                             type_addr, 
                             structure: PyObjectStructure::Object {
                                 raw_data: data,
-                                refcount: 1
+                                refcount: 0
                             }
                         })
                     }
@@ -221,7 +222,7 @@ impl Memory {
                         type_addr, 
                         structure: PyObjectStructure::Object {
                             raw_data: data,
-                            refcount: 1
+                            refcount: 0
                         }
                     }),
                     valid: true,
@@ -507,6 +508,7 @@ impl Runtime {
         } = &mut pyobj.structure
         {
             *refcount = *refcount + 1;
+            //eprintln!("INCREASED addr {} from {} to {}", addr, *refcount - 1, *refcount);
         }
     }
 
@@ -520,11 +522,29 @@ impl Runtime {
             if *refcount > 0 {
                 *refcount = *refcount - 1;
             }
-            if *refcount <= 1 {
+
+            //eprintln!("Decreased addr {} from {} to {}", addr, *refcount + 1, *refcount);
+            if *refcount <= 0 {
+                //eprintln!("Deallocated addr {}", addr);
                 self.memory.deallocate(addr);
             }
         }
     }
+
+    pub fn get_refcount(&self, addr: MemoryAddress) -> usize {
+        let pyobj = self.get_pyobj_byaddr(addr);
+        if let PyObjectStructure::Object {
+            raw_data: _,
+            refcount,
+        } = &pyobj.structure
+        {
+            return *refcount;
+        } else {
+            //@TODO Is this even possible? All PyObjects should have a refcount...?
+            panic!("PyObject has no refcount...");
+        }
+    }
+
 
     pub fn get_type_method_addr_byname(
         &self,

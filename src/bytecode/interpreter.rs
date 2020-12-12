@@ -80,79 +80,6 @@ pub fn handle_store_const(runtime: &mut Runtime, const_data: &Const) {
     runtime.store_const(loaded_addr);
 }
 
-//optimization: if binary add, then we check the TOS and TOS-1. If both are numeric, then 
-//we just do the operation here and now, very fast, without creating a new stack frame.
-//If both types are not numeric or not simple/common to be operated on, we just call __add__ on TOS-1 etc
-pub fn handle_binary_add(runtime: &mut Runtime) {
-    let tos = runtime.top_stack();
-    let tos_1 = runtime.get_stack_offset(-1);
-
-    let pyobj_tos = runtime.get_pyobj_byaddr(tos);
-    let pyobj_tos_1 = runtime.get_pyobj_byaddr(tos_1);
-
-    let result;
-    
-    if let PyObjectStructure::Object{ raw_data: raw_data_tos, refcount: _} = &pyobj_tos.structure {
-        if let PyObjectStructure::Object{ raw_data: raw_data_tos_1, refcount: _} = &pyobj_tos_1.structure {
-            match raw_data_tos {
-                BuiltInTypeData::Int(j) => {
-                    match raw_data_tos_1 {
-                        BuiltInTypeData::Int(i) => {
-                            result = Some(BuiltInTypeData::Int(j + i))
-                        }
-                        BuiltInTypeData::Float(f) => {
-                            result = Some(BuiltInTypeData::Float(Float(*j as f64 + f.0)))
-                        }
-                       _ => {
-                            result = None;
-                        }
-                    }
-                }
-                BuiltInTypeData::Float(j) => {
-                    match raw_data_tos_1 {
-                        BuiltInTypeData::Int(i) => {
-                            result = Some(BuiltInTypeData::Float(Float(j.0 + *i as f64)))
-                        }
-                        BuiltInTypeData::Float(f) => {
-                            result = Some(BuiltInTypeData::Float(Float( j.0 as f64 + f.0)))
-                        }
-                        _ => {
-                            result = None;
-                        }
-                    }
-                }
-                _ => {
-                    result = None;
-                }
-            }
-        } else {
-            result = None;
-        }
-    } else {
-        result = None;
-    }
-
-    if result.is_none() {
-        //TODO terrible
-        runtime.pop_stack();
-        runtime.pop_stack();
-        runtime.push_onto_stack(tos_1);
-        handle_load_method(runtime, "__add__");
-        runtime.push_onto_stack(tos);
-        handle_method_call(runtime, 1);
-    }
-    else {
-        let type_addr = match &result.as_ref().unwrap() {
-            BuiltInTypeData::Int(_) => runtime.builtin_type_addrs.int,
-            BuiltInTypeData::Float(_) => runtime.builtin_type_addrs.float,
-            _ => { panic!("unknown error") }
-        };
-
-        let addr = runtime.allocate_type_byaddr_raw(type_addr, result.unwrap());
-        runtime.push_onto_stack(addr);
-    }
-}
-
 pub fn handle_load_method(runtime: &mut Runtime, method_name: &str) {
     let stack_top = runtime.top_stack();
     let pyobj = runtime.get_pyobj_byaddr(stack_top);
@@ -167,6 +94,218 @@ pub fn handle_load_method(runtime: &mut Runtime, method_name: &str) {
         }
     }
 }
+
+//optimization: if binary add, then we check the TOS and TOS-1. If both are numeric, then 
+//we just do the operation here and now, very fast, without creating a new stack frame.
+//If both types are not numeric or not simple/common to be operated on, we just call __add__ on TOS-1 etc
+macro_rules! create_binary_operator {
+    ($method_name:tt, $param_a:tt, $param_b:tt, $operation:expr, $pycall:expr) => {
+        fn $method_name(runtime: &mut Runtime) {
+            let tos = runtime.pop_stack();
+            let tos_1 = runtime.pop_stack();
+            
+            let pyobj_tos = runtime.get_pyobj_byaddr(tos);
+            let pyobj_tos_1 = runtime.get_pyobj_byaddr(tos_1);
+        
+            let result;
+            let mut refcount_tos: usize = 0;
+            let mut refcount_tos_1: usize = 0;
+            if let PyObjectStructure::Object{ raw_data: raw_data_tos, refcount: r1} = &pyobj_tos.structure {
+                if let PyObjectStructure::Object{ raw_data: raw_data_tos_1, refcount: r2} =  &pyobj_tos_1.structure {
+                    refcount_tos = *r1;
+                    refcount_tos_1 = *r2;
+                    match raw_data_tos {
+                        BuiltInTypeData::Int(j) => {
+                            match raw_data_tos_1 {
+                                BuiltInTypeData::Int(i) => {
+                                    let $param_a = i;
+                                    let $param_b = j;
+                                    //println!("result binary of operation {} {} {} is {}", $param_a, $pycall, $param_b, $operation);
+                                    result = Some(BuiltInTypeData::Int($operation))
+                                }
+                                BuiltInTypeData::Float(f) => {
+                                    let $param_a = f.0;
+                                    let $param_b = *j as f64;
+                                    result = Some(BuiltInTypeData::Float(Float($operation)))
+                                }
+                               _ => {
+                                    result = None;
+                                }
+                            }
+                        }
+                        BuiltInTypeData::Float(j) => {
+                            match raw_data_tos_1 {
+                                BuiltInTypeData::Int(i) => {
+                                    let $param_a = *i as f64;
+                                    let $param_b = j.0;
+                                    result = Some(BuiltInTypeData::Float(Float($operation)))
+                                }
+                                BuiltInTypeData::Float(f) => {
+                                    let $param_a = f.0;
+                                    let $param_b = j.0;
+                                    result = Some(BuiltInTypeData::Float(Float($operation)))
+                                }
+                                _ => {
+                                    result = None;
+                                }
+                            }
+                        }
+                        _ => {
+                            result = None;
+                        }
+                    }
+                } else {
+                    result = None;
+                }
+            } else {
+                result = None;
+            }
+        
+            if result.is_none() {
+                //TODO terrible
+                runtime.push_onto_stack(tos_1);
+                handle_load_method(runtime, $pycall);
+                runtime.push_onto_stack(tos);
+                handle_method_call(runtime, 1);
+
+            }
+            else {
+                let type_addr = match &result.as_ref().unwrap() {
+                    BuiltInTypeData::Int(_) => runtime.builtin_type_addrs.int,
+                    BuiltInTypeData::Float(_) => runtime.builtin_type_addrs.float,
+                    _ => { panic!("unknown error") }
+                };
+        
+                //:GarbageCollector
+                if refcount_tos == 0 {
+                    runtime.decrease_refcount(tos); //decrease_refcount currently also deallocates if reaches 0
+                }
+
+                if refcount_tos_1 == 0 {
+                    runtime.decrease_refcount(tos_1);
+                }
+
+                let addr = runtime.allocate_type_byaddr_raw(type_addr, result.unwrap());
+               // eprintln!("Allocated new object on {}", addr);
+                runtime.push_onto_stack(addr);
+            }
+        }
+    }
+}
+macro_rules! create_compare_operator {
+    ($method_name:tt, $param_a:tt, $param_b:tt, $operation:expr, $pycall:expr) => {
+        fn $method_name(runtime: &mut Runtime) {
+            let tos = runtime.pop_stack();
+            let tos_1 = runtime.pop_stack();
+
+            let pyobj_tos = runtime.get_pyobj_byaddr(tos);
+            let pyobj_tos_1 = runtime.get_pyobj_byaddr(tos_1);
+
+            let result;
+            let mut refcount_tos: usize = 0;
+            let mut refcount_tos_1: usize = 0;
+            if let PyObjectStructure::Object{ raw_data: raw_data_tos, refcount: r1} = &pyobj_tos.structure {
+                if let PyObjectStructure::Object{ raw_data: raw_data_tos_1, refcount: r2} = &pyobj_tos_1.structure {
+                    refcount_tos = *r1;
+                    refcount_tos_1 = *r2;
+                    match raw_data_tos {
+                        BuiltInTypeData::Int(j) => {
+                            match raw_data_tos_1 {
+                                BuiltInTypeData::Int(i) => {
+                                    let $param_a = i;
+                                    let $param_b = j;
+                                   // println!("result of operation {} {} {} is {}", $param_a, $pycall, $param_b, compare_result);
+                                    result = Some($operation);
+                                }
+                                BuiltInTypeData::Float(f) => {
+                                    let $param_a = f.0;
+                                    let $param_b = *j as f64;
+                                    result = Some($operation);
+                                }
+                                _ => {
+                                    result = None;
+                                }
+                            }
+                        }
+                        BuiltInTypeData::Float(j) => {
+                            match raw_data_tos_1 {
+                                BuiltInTypeData::Int(i) => {
+                                    let $param_a = *i as f64;
+                                    let $param_b = j.0;
+                                    result = Some($operation);
+                                }
+                                BuiltInTypeData::Float(f) => {
+                                    let $param_a = f.0;
+                                    let $param_b = j.0;
+                                    result = Some($operation);
+                                }
+                                _ => {
+                                    result = None;
+                                }
+                            }
+                        }
+                        _ => {
+                            result = None;
+                        }
+                    }
+                } else {
+                    result = None;
+                }
+            } else {
+                result = None;
+            }
+
+            if result.is_none() { //rebuild the stack to call method
+                //TODO terrible
+                runtime.push_onto_stack(tos_1);
+                handle_load_method(runtime, $pycall);
+                runtime.push_onto_stack(tos);
+                handle_method_call(runtime, 1);
+            }
+            else {
+
+                //:GarbageCollector @TODO Proper garbage collection, this is perhaps not the right thing to do. 
+                /*
+                    Some extensive comparisons generate intermediate values which are allocated only temporarily. 
+                    They aren't bound to anything, they have no ownership.
+
+                    This code tries to find these temporary allocations: If the unstacked values have 0 references to them,
+                    it's a sign that they're unbounded/not owned by anyone/temporary. We deallocate them so that they don't accumulate.
+
+                    Perhaps a proper garbage collector would rely on a tracing GC to find these allocations after some time has passed.
+                    There is maybe a benefit of deallocating them all in a batch...? 
+                
+                    Perhaps another option is to create a temporary stack, indicated by new opcodes...?
+
+                    We don't have tracing/mark and sweep GC now so this will have to be sufficient for now.
+                */
+
+                if refcount_tos == 0 {
+                    runtime.decrease_refcount(tos); //decrease_refcount currently also deallocates if reaches 0
+                }
+
+                if refcount_tos_1 == 0 {
+                    runtime.decrease_refcount(tos_1);
+                }
+
+                if result.unwrap() {
+                    runtime.push_onto_stack(runtime.builtin_type_addrs.true_val);
+                } else {
+                    runtime.push_onto_stack(runtime.builtin_type_addrs.false_val);
+                }
+            }
+        }
+    };
+}
+
+create_binary_operator!(handle_binary_add, a, b, a + b, "__add__");
+create_binary_operator!(handle_binary_mod, a, b, a % b, "__mod__");
+
+create_compare_operator!(handle_compare_greater, a, b, a > b, "__gt__");
+create_compare_operator!(handle_compare_less, a, b, a < b, "__lt__");
+create_compare_operator!(handle_compare_equals, a, b, a == b, "__eq__");
+
+
 
 pub fn handle_load_function(runtime: &mut Runtime, method_name: &str) {
     let obj = runtime.find_in_module(BUILTIN_MODULE, method_name);
@@ -218,18 +357,33 @@ pub fn handle_store_name(runtime: &mut Runtime, name: usize) {
 //returns true if jumped
 pub fn handle_jump_if_false_pop(runtime: &mut Runtime, destination: usize) -> bool {
     let stack_top = runtime.pop_stack();
-    let as_boolean = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
-    let raw_value = runtime.get_raw_data_of_pyobj(as_boolean).take_int();
-    let result = if raw_value == 0 {
-        runtime.set_pc(destination);
-        true
+    let raw_value = runtime.get_raw_data_of_pyobj(stack_top);
+
+    if let BuiltInTypeData::Int(x) = raw_value {
+        let result = if *x == 0 {
+            runtime.set_pc(destination);
+            true
+        } else {
+            false
+        };
+        runtime.decrease_refcount(stack_top);
+        return result;
     } else {
-        false
-    };
 
-    runtime.decrease_refcount(as_boolean);
+        let as_boolean = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
+        let raw_value = runtime.get_raw_data_of_pyobj(as_boolean).take_int();
+        let result = if raw_value == 0 {
+            runtime.set_pc(destination);
+            true
+        } else {
+            false
+        };
+    
+        runtime.decrease_refcount(stack_top);
+    
+        return result;
+    }
 
-    return result;
 }
 
 pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
@@ -258,6 +412,7 @@ pub fn execute_program(runtime: &mut Runtime, program: Program) {
 
         let mut advance_pc = true;
         let instruction = program.code.get(runtime.get_pc()).unwrap();
+        //println!("Executing instruction {:?}", instruction);
         match instruction {
             Instruction::CallMethod { number_arguments } => {
                 handle_method_call(runtime, *number_arguments)
@@ -273,6 +428,10 @@ pub fn execute_program(runtime: &mut Runtime, program: Program) {
             Instruction::StoreName(name) 
                 => handle_store_name(runtime, *name),
             Instruction::BinaryAdd => handle_binary_add(runtime),
+            Instruction::BinaryModulus => handle_binary_mod(runtime),
+            Instruction::CompareLessThan => handle_compare_less(runtime),
+            Instruction::CompareGreaterThan => handle_compare_greater(runtime),
+            Instruction::CompareEquals => handle_compare_equals(runtime),
                 Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
             Instruction::JumpUnconditional(destination) =>{
                 handle_jump_unconditional(runtime, *destination);

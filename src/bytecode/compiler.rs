@@ -38,51 +38,65 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             let constval = Const::String(s);
             return process_constval(constval, const_map);
         },
-        Expr::BinaryOperation(lhs, Operator::Plus, rhs) => {
-            let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
-            let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
-            let mut final_instructions = vec![];
-            
-            final_instructions.append(&mut lhs_program);
-            final_instructions.append(&mut rhs_program);
-            final_instructions.push(Instruction::BinaryAdd);
-
-            return final_instructions;
-        },
         Expr::BinaryOperation(lhs, op, rhs) => {
-            let mut load_method: Vec<Instruction> = match op {
-                Operator::And => vec![Instruction::LoadMethod(String::from("__and__"))],
-                Operator::Or => vec![Instruction::LoadMethod(String::from("__or__"))],
-                Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
-                //Operator::Plus => vec![Instruction::LoadMethod(String::from("__add__"))],
-                //Operator::Plus => vec![Instruction::BinaryAdd],
-                Operator::Mod => vec![Instruction::LoadMethod(String::from("__mod__"))],
-                Operator::Minus => vec![Instruction::LoadMethod(String::from("__sub__"))],
-                Operator::Multiply => vec![Instruction::LoadMethod(String::from("__mul__"))],
-                Operator::Divide => vec![Instruction::LoadMethod(String::from("__truediv__"))],
-                Operator::Equals => vec![Instruction::LoadMethod(String::from("__eq__"))],
-                Operator::NotEquals => vec![Instruction::LoadMethod(String::from("__ne__"))],
-                Operator::Greater => vec![Instruction::LoadMethod(String::from("__gt__"))],
-                Operator::GreaterEquals => vec![Instruction::LoadMethod(String::from("__ge__"))],
-                Operator::Less => vec![Instruction::LoadMethod(String::from("__lt__"))],
-                Operator::LessEquals => vec![Instruction::LoadMethod(String::from("__le__"))],
-                _ => panic!("operator not implemented: {:?}", op),
-            };
-
-            let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
-            let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
-
-            let call = Instruction::CallMethod {
-                number_arguments: 1,
-            };
-
-            let mut final_instructions = vec![];
-            final_instructions.append(&mut lhs_program);
-            final_instructions.append(&mut load_method);
-            final_instructions.append(&mut rhs_program);
-            final_instructions.push(call);
-
-            return final_instructions;
+            match op {
+                Operator::Plus | Operator::Mod |  Operator::Less |  Operator::Greater | Operator::Equals => {
+                    let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
+                    let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
+                    let mut final_instructions = vec![];
+                    
+                    final_instructions.append(&mut lhs_program);
+                    final_instructions.append(&mut rhs_program);
+                    let opcode = match op {
+                        Operator::Plus => Instruction::BinaryAdd,
+                        Operator::Mod => Instruction::BinaryModulus,
+                        Operator::Less => Instruction::CompareLessThan,
+                        Operator::Greater => Instruction::CompareGreaterThan,
+                        Operator::Equals => Instruction::CompareEquals,
+                        _ => {
+                            panic!("Shouldn't happen")
+                        }
+                    };
+                    final_instructions.push(opcode);
+        
+                    return final_instructions;
+                },
+                _ => {
+                    let mut load_method: Vec<Instruction> = match op {
+                        Operator::And => vec![Instruction::LoadMethod(String::from("__and__"))],
+                        Operator::Or => vec![Instruction::LoadMethod(String::from("__or__"))],
+                        Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
+                        //Operator::Plus => vec![Instruction::LoadMethod(String::from("__add__"))],
+                        //Operator::Plus => vec![Instruction::BinaryAdd],
+                       // Operator::Mod => vec![Instruction::LoadMethod(String::from("__mod__"))],
+                        Operator::Minus => vec![Instruction::LoadMethod(String::from("__sub__"))],
+                        Operator::Multiply => vec![Instruction::LoadMethod(String::from("__mul__"))],
+                        Operator::Divide => vec![Instruction::LoadMethod(String::from("__truediv__"))],
+                        Operator::Equals => vec![Instruction::LoadMethod(String::from("__eq__"))],
+                        Operator::NotEquals => vec![Instruction::LoadMethod(String::from("__ne__"))],
+                       // Operator::Greater => vec![Instruction::LoadMethod(String::from("__gt__"))],
+                        Operator::GreaterEquals => vec![Instruction::LoadMethod(String::from("__ge__"))],
+                        //Operator::Less => vec![Instruction::LoadMethod(String::from("__lt__"))],
+                        Operator::LessEquals => vec![Instruction::LoadMethod(String::from("__le__"))],
+                        _ => panic!("operator not implemented: {:?}", op),
+                    };
+        
+                    let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
+                    let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
+        
+                    let call = Instruction::CallMethod {
+                        number_arguments: 1,
+                    };
+        
+                    let mut final_instructions = vec![];
+                    final_instructions.append(&mut lhs_program);
+                    final_instructions.append(&mut load_method);
+                    final_instructions.append(&mut rhs_program);
+                    final_instructions.push(call);
+        
+                    return final_instructions;
+                }
+            }
         }
         Expr::UnaryExpression(op, rhs) => {
             let mut load_method: Vec<Instruction> = match op {
@@ -294,9 +308,7 @@ mod tests {
         let tokens = tokenize(
             "
 x = 0
-y = 0
-while x < 10:
-    y = y + 1
+while x < 1000:
     x = x + 1
 ",
         )
@@ -304,9 +316,33 @@ while x < 10:
         let expr = parse_ast(tokens);
         let program = compile( expr);
         interpreter::execute_program(&mut runtime, program);
-        let y_value = runtime.get_local(1).unwrap();
-        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
-        assert_eq!(raw_y, 10);
+        let x_value = runtime.get_local(0).unwrap();
+        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
+        assert_eq!(raw_x, 1000);
+    }
+
+    #[test]
+    fn while_statements2() {
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
+        let tokens = tokenize(
+            "
+x = 0
+y = 0
+z = 0
+while x < 1000:
+    x = x + 1
+    y = y + 1
+    z = z + 1
+",
+        )
+        .unwrap();
+        let expr = parse_ast(tokens);
+        let program = compile( expr);
+        interpreter::execute_program(&mut runtime, program);
+        let x_value = runtime.get_local(0).unwrap();
+        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
+        assert_eq!(raw_x, 1000);
     }
 
     #[test]
@@ -317,10 +353,10 @@ while x < 10:
             "
 x = 0
 y = 0
-while x < 10:
+while x < 10000:
     y = y + 1
     x = x + 1
-    if x == 5:
+    if x == 5000:
         break
 ",
         )
@@ -328,9 +364,37 @@ while x < 10:
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
+        let x_value = runtime.get_local(0).unwrap();
         let y_value = runtime.get_local(1).unwrap();
+        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
         let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
-        assert_eq!(raw_y, 5);
+        assert_eq!(raw_y, 5000);
+        assert_eq!(raw_x, 5000);
+    }
+
+    #[test]
+    fn benchmark_program() {
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
+        let tokens = tokenize(
+            "
+x = 0
+y = 0
+mod5 = 0
+while x < 1000:
+    y = y + 1
+    x = x + 1
+    if x % 5 == 0:
+        mod5 = mod5 + 1
+",
+        )
+        .unwrap();
+        let expr = parse_ast(tokens);
+        let program =  compile(expr);
+        interpreter::execute_program(&mut runtime, program);
+        let mod5_value = runtime.get_local(2).unwrap();
+        let raw_mod5 = runtime.get_raw_data_of_pyobj(mod5_value).take_int();
+        assert_eq!(raw_mod5, 200);
     }
 
     #[test]

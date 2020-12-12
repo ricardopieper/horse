@@ -21,6 +21,10 @@ pub enum Instruction {
     JumpIfFalseAndPopStack(usize),
     JumpUnconditional(usize),
     BinaryAdd,
+    BinaryModulus,
+    CompareGreaterThan,
+    CompareEquals,
+    CompareLessThan,
     UnresolvedBreak
 }
 
