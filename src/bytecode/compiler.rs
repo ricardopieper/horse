@@ -156,7 +156,7 @@ struct ConstAndIndex {
 
 
 pub fn compile(ast: Vec<AST>) -> Program {
-    println!("{:?}", ast);
+
     let mut const_values_and_indices = HashMap::new();
     let instructions = compile_ast(ast, 0, &mut const_values_and_indices);
 
@@ -171,10 +171,10 @@ pub fn compile(ast: Vec<AST>) -> Program {
             }
         }
     }
-    println!("new: {:?}", instructions);
+
     //Instead of storing values in string names (hashing strings is slooooooooooooooooow), store variables in
     //integer slots 
-    let new_instructions = instructions.iter().map(|instruction| {
+    let new_instructions: Vec<Instruction> = instructions.iter().map(|instruction| {
         return if let Instruction::UnresolvedLoadName(name) = instruction {
             match names_indices.get(&name) {
                 Some(idx) => Instruction::LoadName(*idx),
@@ -190,8 +190,10 @@ pub fn compile(ast: Vec<AST>) -> Program {
         }
     }).collect();
 
-    println!("new: {:?}", instructions);
-    
+    //for inst in new_instructions.iter() {
+    //    println!("{:?}", inst)
+    //}
+
     let mut vec_const = vec![];
     for (constval, index) in const_values_and_indices {
         vec_const.push(ConstAndIndex {

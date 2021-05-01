@@ -467,7 +467,6 @@ impl Runtime {
     }
 
     pub fn find_module(&self, module: &str) -> Option<MemoryAddress> {
-        println!("Modules: {:?}", self.modules);
         return self.modules.get(module).map(|addr: &MemoryAddress| *addr);
     }
 

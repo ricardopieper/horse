@@ -531,7 +531,6 @@ impl Parser {
             //and parse the sub-expression recursively
             {
                 let tok: Token = self.cur().clone();
-                println!("Parsing {:?}", tok);
                 match tok {
                     Token::Operator(Operator::OpenParen) => {
                         self.new_stack(); //new parsing stack/state

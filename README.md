@@ -19,11 +19,10 @@ The math functions in the `math` module were added to the `__builtins__` module 
 
 The implemented types as of now are `NoneType`, `NotImplemented`, `int` and `float`, `bool` and `str`. They are not complete.
 
-The plan is to be able to run a reasonable Python program, therefore support for strings, 
-classes, etc may come in the future.
+The plan is to be able to run a reasonable Python program. It still needs to suport list operations, maps, sets, literal sintaxes, etc.
 
-The expected performance is to be `snail-like`, even slower than Python. It will be enough if it works and computes 
-stuff correctly.
+The expected performance is to be even slower than Python. It will be enough if it works and computes stuff correctly. However I spent some time
+optimizing some stuff.
 
 Architecture
 ------------
@@ -46,7 +45,7 @@ these binary operations. It also implements everything as an object.
 Does it work?
 -------------
 
-There are 119 tests so far, they test almost everything and they all pass. 
+There are 133 tests so far, they test almost everything and they all pass. 
 
 Is it stable?
 -------------
@@ -68,31 +67,58 @@ Also, some stuff may not be idiomatic Rust.
 Bytecode
 --------
 
-This is an example of the bytecode for the expression `cos(sin(-(5.0 / 9.0) * 32.0)) / tanh(cos(1.0) - (5.0 / 9.0))`:
+The bytecode is based on python's own bytecode. However we won't be able to load a python `.pyc` bytecode file and just run it. If this interpreter ever
+saves a .pyc file, it would also not be loadable by cpython interpreter. The .pyc bytecode doen't really seem designed to be compatible across python versions, so I don't bother either.
 
-    LoadFunction("cos")
-    LoadFunction("sin")
-    LoadConst(Float(5.0))
-    LoadMethod("__truediv__")
-    LoadConst(Float(9.0))
-    CallMethod { number_arguments: 1 }
-    LoadMethod("__neg__")
-    CallMethod { number_arguments: 0 }
-    LoadMethod("__mul__")
-    LoadConst(Float(32.0))
-    CallMethod { number_arguments: 1 }
+    x = 0
+    y = 0
+    mod5 = 0
+    while x < 900000:
+        y = y + 1
+        x = x + 1
+        if x % 5 == 0:
+            mod5 = mod5 + 1
+    print(mod5)
+
+The bytecode for the code above is:
+
+    LoadConst(0)
+    StoreName(0)
+    LoadConst(0)
+    StoreName(1)
+    LoadConst(0)
+    StoreName(2)
+    LoadName(0)
+    LoadConst(1)
+    CompareLessThan
+    JumpIfFalseAndPopStack(29)
+    LoadName(1)
+    LoadConst(2)
+    BinaryAdd
+    StoreName(1)
+    LoadName(0)
+    LoadConst(2)
+    BinaryAdd
+    StoreName(0)
+    LoadName(0)
+    LoadConst(3)
+    BinaryModulus
+    LoadConst(0)
+    CompareEquals
+    JumpIfFalseAndPopStack(28)
+    LoadName(2)
+    LoadConst(2)
+    BinaryAdd
+    StoreName(2)
+    JumpUnconditional(6)
+    LoadFunction("print")
+    LoadName(2)
     CallFunction { number_arguments: 1 }
-    CallFunction { number_arguments: 1 }
-    LoadMethod("__truediv__")
-    LoadFunction("tanh")
-    LoadFunction("cos")
-    LoadConst(Float(1.0))
-    CallFunction { number_arguments: 1 }
-    LoadMethod("__sub__")
-    LoadConst(Float(5.0))
-    LoadMethod("__truediv__")
-    LoadConst(Float(9.0))
-    CallMethod { number_arguments: 1 }
-    CallMethod { number_arguments: 1 }
-    CallFunction { number_arguments: 1 }
-    CallMethod { number_arguments: 1 }
+
+We store consts in a "data" section of the compiled program as well:
+
+    pub struct Program {
+        pub version: u64,
+        pub data: Vec<Const>,
+        pub code: Vec<Instruction>,
+    }
