@@ -12,6 +12,8 @@ pub enum Expr {
     BinaryOperation(Box<Expr>, Operator, Box<Expr>),
     Parenthesized(Box<Expr>),
     UnaryExpression(Operator, Box<Expr>),
+    MemberAccess(Box<Expr>, String),
+    Array(Vec<Expr>)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -492,7 +494,7 @@ impl Parser {
                 parsed_successfully = true;
                 assert!(
                     !self.is_not_end() || self.cur_is_newline(),
-                    "Newline or EOF expected after standalone expr"
+                    "Newline or EOF expected after standalone expr, instead found {:?}", self.cur()
                 );
             }
 
@@ -529,10 +531,11 @@ impl Parser {
             //and parse the sub-expression recursively
             {
                 let tok: Token = self.cur().clone();
+                println!("Parsing {:?}", tok);
                 match tok {
                     Token::Operator(Operator::OpenParen) => {
                         self.new_stack(); //new parsing stack/state
-                        self.next(); //move to the first character, out of the OpenParen
+                        self.next(); //move to the first token, out of the OpenParen
 
                         match self.parse_expr() {
                             //try parse stuff
@@ -551,6 +554,31 @@ impl Parser {
                             Err(e) => {
                                 eprintln!("Failed parsing exprssion: {:?}", e);
                                 return Err(e);
+                            }
+                        }
+                    }
+                    Token::OpenArrayBracket => {
+                        self.new_stack(); //new parsing stack/state
+                        self.next(); //move to the first token, out of the open array
+                        
+                        if let Token::CloseArrayBracket = self.cur() {
+                            self.push_operand(Expr::Array(vec![]));
+                        } else {
+                            let list_of_exprs = self.parse_comma_sep_list_expr();
+                            match list_of_exprs {
+                                //try parse stuff
+                                Ok(expressions) => {
+                                    //worked
+                                    //commit the result
+                                    let popped = self.pop_stack();
+                                    let resulting_exprs = expressions.resulting_expr_list;
+                                    self.push_operand(Expr::Array(resulting_exprs));
+                                    self.set_cur(popped.index);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed parsing exprssion: {:?}", e);
+                                    return Err(e);
+                                }
                             }
                         }
                     }
@@ -589,11 +617,10 @@ impl Parser {
                                     self.new_stack();
                                     let list_of_exprs = self.parse_comma_sep_list_expr();
 
-                                    //
                                     match list_of_exprs {
                                         //try parse stuff
                                         Ok(expressions) => {
-                                            //worked
+
                                             //commit the result
                                             let popped = self.pop_stack();
                                             let resulting_exprs = expressions.resulting_expr_list;
@@ -619,6 +646,23 @@ impl Parser {
 
                         was_operand = true;
                     }
+                    Token::MemberAccessor => {
+                        //next token should be an identifier
+                        self.next();
+                        let popped = self.operand_stack_mut().pop();
+                        let cur_token = self.cur();
+                        if let Token::Identifier(name) = cur_token {
+                            
+                            let cur_expr = popped.unwrap();
+                            let member_access_expr = Expr::MemberAccess(
+                                Box::new(cur_expr), name.to_string()
+                            );
+                            self.push_operand(member_access_expr);
+                        } else {
+                            return Err(ParsingError::ExprError("Failed parsing member acessor".into()));
+                        }
+
+                    }
                     Token::LiteralInteger(i) => {
                         self.push_operand(Expr::IntegerValue(i));
                         was_operand = true;
@@ -639,7 +683,7 @@ impl Parser {
                         self.push_operand(Expr::BooleanValue(false));
                         was_operand = true;
                     }
-                    Token::Operator(Operator::CloseParen) => {
+                    Token::Operator(Operator::CloseParen) | Token::CloseArrayBracket => {
                         not_part_of_expr = true;
                     }
                     Token::Operator(o) => self.push_operator(o),
@@ -2073,6 +2117,69 @@ print(y)",
             ),
         }];
 
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn array_of_ints() {
+        let tokens = tokenize("[1,2,3]").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::Array(vec![
+                Expr::IntegerValue(1),
+                Expr::IntegerValue(2),
+                Expr::IntegerValue(3)]);
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn array_of_strings() {
+        let tokens = tokenize("[\"one\",\"two\",\"3\"]").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::Array(vec![
+                Expr::StringValue("one".to_string()),
+                Expr::StringValue("two".to_string()),
+                Expr::StringValue("3".to_string())]);
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn array_of_stuff() {
+        let tokens = tokenize("[1, 'two', True, 4.565]").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::Array(vec![
+                Expr::IntegerValue(1),
+                Expr::StringValue("two".to_string()),
+                Expr::BooleanValue(true),
+                Expr::FloatValue(Float(4.565))]);
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn assign_array() {
+        let tokens = tokenize("x = [1, 2]").unwrap();
+        let result = parse_ast(tokens);
+        let expr = Expr::Array(vec![
+                Expr::IntegerValue(1),
+                Expr::IntegerValue(2)]);
+        let expected = vec![AST::Assign {
+            variable_name: String::from("x"),
+            expression: expr
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn member_acessor() {
+        let tokens = tokenize("obj.prop").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(
+            Expr::MemberAccess(
+                Box::new(Expr::Variable("obj".into())), 
+                "prop".into())
+        )];
         assert_eq!(expected, result);
     }
 }

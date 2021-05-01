@@ -14,7 +14,7 @@ Currently, stuff like this should work:
             print(sin(x))
             break
 
-The math functions in the `math` module were added to the `__builtin__` module for convenience. There is also a 
+The math functions in the `math` module were added to the `__builtins__` module for convenience. There is also a 
 `print` function, which takes 1 argument.
 
 The implemented types as of now are `NoneType`, `NotImplemented`, `int` and `float`, `bool` and `str`. They are not complete.

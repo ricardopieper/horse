@@ -42,6 +42,9 @@ pub enum Token {
     BreakKeyword,
     ElifKeyword,
     ElseKeyword,
+    OpenArrayBracket,
+    CloseArrayBracket,
+    MemberAccessor,
     Indentation
 }
 
@@ -54,6 +57,9 @@ enum PartialToken {
     String(String),
     NewLine,
     Comma,
+    OpenArrayBracket,
+    CloseArrayBracket,
+    MemberAccessor,
     Colon,
 }
 
@@ -80,6 +86,9 @@ impl PartialToken {
             Self::Comma => Token::Comma,
             Self::Colon => Token::Colon,
             Self::NewLine => Token::NewLine,
+            Self::MemberAccessor => Token::MemberAccessor,
+            Self::OpenArrayBracket => Token::OpenArrayBracket,
+            Self::CloseArrayBracket => Token::CloseArrayBracket,
             Self::LiteralFloat(s) => {
                 if s.contains('.') || s.contains('e') {
                     match s.parse::<f64>() {
@@ -309,6 +318,21 @@ impl Tokenizer {
             }
             else if self.cur() == ':' {
                 self.cur_partial_token = PartialToken::Colon;
+                self.commit_current_token();
+                self.next();
+            }
+            else if self.cur() == '[' {
+                self.cur_partial_token = PartialToken::OpenArrayBracket;
+                self.commit_current_token();
+                self.next();
+            }
+            else if self.cur() == ']' {
+                self.cur_partial_token = PartialToken::CloseArrayBracket;
+                self.commit_current_token();
+                self.next();
+            }
+            else if self.cur() == '.' {
+                self.cur_partial_token = PartialToken::MemberAccessor;
                 self.commit_current_token();
                 self.next();
             }
@@ -698,4 +722,34 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn method_call() -> Result<(), String> {
+        let result = tokenize("obj.method")?;
+        assert_eq!(
+            result,
+            [
+                Token::Identifier(String::from("obj")),
+                Token::MemberAccessor,
+                Token::Identifier(String::from("method")),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn method_call2() -> Result<(), String> {
+        let result = tokenize("obj . method")?;
+        assert_eq!(
+            result,
+            [
+                Token::Identifier(String::from("obj")),
+                Token::MemberAccessor,
+                Token::Identifier(String::from("method")),
+            ]
+        );
+        Ok(())
+    }
+
+
 }

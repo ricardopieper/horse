@@ -85,10 +85,57 @@ pub fn handle_load_method(runtime: &mut Runtime, method_name: &str) {
     let pyobj = runtime.get_pyobj_byaddr(stack_top);
 
     let type_addr = pyobj.type_addr;
-    let obj = runtime.get_type_method_addr_byname(type_addr, method_name);
+    let obj = runtime.get_method_addr_byname(type_addr, method_name);
 
     match obj {
         None => panic!("type has no method {}", method_name),
+        Some(addr) => {
+            runtime.push_onto_stack(addr);
+        }
+    }
+}
+
+pub fn handle_load_global(runtime: &mut Runtime, global_name: &str) {
+    //for now the only globals are modules
+    match runtime.find_module(global_name) {
+        Some(addr) => {
+            runtime.push_onto_stack(addr);
+            return
+        },
+        None => { panic!("could not find global named {}", global_name)}
+    };
+}
+
+pub fn handle_load_attr(runtime: &mut Runtime, attr_name: &str) {
+    let stack_top = runtime.top_stack();
+
+    //first: attempt to load an object property
+    match runtime.get_obj_property(stack_top, attr_name) {
+        Some(addr) => {
+            runtime.push_onto_stack(addr);
+            return
+        },
+        None => { }
+    }
+    
+    //second: try to load a method name
+    let pyobj = runtime.get_pyobj_byaddr(stack_top);
+    let type_addr = pyobj.type_addr;
+
+    let obj = runtime.get_method_addr_byname(type_addr, attr_name);
+    match obj {
+        None => { },
+        Some(addr) => {
+            runtime.push_onto_stack(addr);
+            return
+        }
+    }
+
+    //third: try to load a module function, property, etc
+    let obj = runtime.find_in_module_addr(stack_top, attr_name);
+
+    match obj {
+        None => panic!("could not find attribute named {}", attr_name),
         Some(addr) => {
             runtime.push_onto_stack(addr);
         }
@@ -120,7 +167,6 @@ macro_rules! create_binary_operator {
                                 BuiltInTypeData::Int(i) => {
                                     let $param_a = i;
                                     let $param_b = j;
-                                    //println!("result binary of operation {} {} {} is {}", $param_a, $pycall, $param_b, $operation);
                                     result = Some(BuiltInTypeData::Int($operation))
                                 }
                                 BuiltInTypeData::Float(f) => {
@@ -161,32 +207,30 @@ macro_rules! create_binary_operator {
                 result = None;
             }
         
-            if result.is_none() {
+            if result.is_none() { //rebuild the stack to call method (optimization did not work)
                 //TODO terrible
                 runtime.push_onto_stack(tos_1);
                 handle_load_method(runtime, $pycall);
                 runtime.push_onto_stack(tos);
                 handle_method_call(runtime, 1);
-
             }
             else {
-                let type_addr = match &result.as_ref().unwrap() {
-                    BuiltInTypeData::Int(_) => runtime.builtin_type_addrs.int,
-                    BuiltInTypeData::Float(_) => runtime.builtin_type_addrs.float,
-                    _ => { panic!("unknown error") }
-                };
-        
+                
                 //:GarbageCollector
                 if refcount_tos == 0 {
-                    runtime.decrease_refcount(tos); //decrease_refcount currently also deallocates if reaches 0
+                    runtime.decrease_refcount(tos); 
                 }
 
                 if refcount_tos_1 == 0 {
                     runtime.decrease_refcount(tos_1);
                 }
 
-                let addr = runtime.allocate_type_byaddr_raw(type_addr, result.unwrap());
-               // eprintln!("Allocated new object on {}", addr);
+                let addr = match result {
+                    Some(i @ BuiltInTypeData::Int(_)) => runtime.allocate_type_byaddr_raw(runtime.builtin_type_addrs.int, i),
+                    Some(f @ BuiltInTypeData::Float(_)) => runtime.allocate_type_byaddr_raw(runtime.builtin_type_addrs.float, f),
+                    _ => { panic!("unknown error") }
+                };
+                
                 runtime.push_onto_stack(addr);
             }
         }
@@ -255,7 +299,7 @@ macro_rules! create_compare_operator {
                 result = None;
             }
 
-            if result.is_none() { //rebuild the stack to call method
+            if result.is_none() { //rebuild the stack to call method (optimization did not work)
                 //TODO terrible
                 runtime.push_onto_stack(tos_1);
                 handle_load_method(runtime, $pycall);
@@ -266,7 +310,7 @@ macro_rules! create_compare_operator {
 
                 //:GarbageCollector @TODO Proper garbage collection, this is perhaps not the right thing to do. 
                 /*
-                    Some extensive comparisons generate intermediate values which are allocated only temporarily. 
+                    Some extensive comparison expressions generate intermediate values which are allocated only temporarily. 
                     They aren't bound to anything, they have no ownership.
 
                     This code tries to find these temporary allocations: If the unstacked values have 0 references to them,
@@ -300,12 +344,95 @@ macro_rules! create_compare_operator {
 
 create_binary_operator!(handle_binary_add, a, b, a + b, "__add__");
 create_binary_operator!(handle_binary_mod, a, b, a % b, "__mod__");
+create_binary_operator!(handle_binary_sub, a, b, a - b, "__sub__");
+create_binary_operator!(handle_binary_mul, a, b, a * b, "__mul__");
 
 create_compare_operator!(handle_compare_greater, a, b, a > b, "__gt__");
+create_compare_operator!(handle_compare_greater_eq, a, b, a > b, "__ge__");
 create_compare_operator!(handle_compare_less, a, b, a < b, "__lt__");
+create_compare_operator!(handle_compare_less_eq, a, b, a > b, "__le__");
 create_compare_operator!(handle_compare_equals, a, b, a == b, "__eq__");
+create_compare_operator!(handle_compare_not_eq, a, b, a != b, "__ne__");
 
+//Division is weird so we do it separately. It always results in a float result
+fn handle_binary_truediv(runtime: &mut Runtime) {
+    let tos = runtime.pop_stack();
+    let tos_1 = runtime.pop_stack();
 
+    let pyobj_tos = runtime.get_pyobj_byaddr(tos);
+    let pyobj_tos_1 = runtime.get_pyobj_byaddr(tos_1);
+
+    let result: Option<f64>;
+    let mut refcount_tos: usize = 0;
+    let mut refcount_tos_1: usize = 0;
+    if let PyObjectStructure::Object{ raw_data: raw_data_tos, refcount: r1} = &pyobj_tos.structure {
+        if let PyObjectStructure::Object{ raw_data: raw_data_tos_1, refcount: r2} = &pyobj_tos_1.structure {
+            refcount_tos = *r1;
+            refcount_tos_1 = *r2;
+            match raw_data_tos {
+                BuiltInTypeData::Int(j) => {
+                    match raw_data_tos_1 {
+                        BuiltInTypeData::Int(i) => {
+                            result = Some(*i as f64 / *j as f64);
+                        }
+                        BuiltInTypeData::Float(f) => {
+                            result = Some((*f).0 / *j as f64);
+                        }
+                        _ => {
+                            result = None;
+                        }
+                    }
+                }
+                BuiltInTypeData::Float(j) => {
+                    match raw_data_tos_1 {
+                        BuiltInTypeData::Int(i) => {
+                            result = Some(*i as f64 / j.0 as f64);
+                        }
+                        BuiltInTypeData::Float(f) => {
+                            result = Some((*f).0 / (*j).0);
+                        }
+                        _ => {
+                            result = None;
+                        }
+                    }
+                }
+                _ => {
+                    result = None;
+                }
+            }
+        } else {
+            result = None;
+        }
+    } else {
+        result = None;
+    }
+
+    if result.is_none() { //rebuild the stack to call method
+        //TODO terrible
+        runtime.push_onto_stack(tos_1);
+        handle_load_method(runtime, "__truediv__");
+        runtime.push_onto_stack(tos);
+        handle_method_call(runtime, 1);
+    }
+    else {
+
+        //:GarbageCollector @TODO Proper garbage collection, this is perhaps not the right thing to do. 
+      
+        if refcount_tos == 0 {
+            runtime.decrease_refcount(tos); //decrease_refcount currently also deallocates if reaches 0
+        }
+        if refcount_tos_1 == 0 {
+            runtime.decrease_refcount(tos_1);
+        }
+
+        let addr = match result {
+            Some(f) => runtime.allocate_type_byaddr_raw(runtime.builtin_type_addrs.float, BuiltInTypeData::Float(Float(f))),
+            _ => { panic!("unknown error") }
+        };
+        
+        runtime.push_onto_stack(addr);
+    }
+}
 
 pub fn handle_load_function(runtime: &mut Runtime, method_name: &str) {
     let obj = runtime.find_in_module(BUILTIN_MODULE, method_name);
@@ -383,8 +510,22 @@ pub fn handle_jump_if_false_pop(runtime: &mut Runtime, destination: usize) -> bo
     
         return result;
     }
-
 }
+
+
+pub fn handle_build_list(runtime: &mut Runtime, size: usize) {
+    let mut elements: Vec<MemoryAddress> = vec![];
+    for _ in 0..size {
+        elements.push(runtime.pop_stack());
+    }
+    elements.reverse();
+
+    let built_list =
+        runtime.allocate_type_byaddr_raw (runtime.builtin_type_addrs.list, BuiltInTypeData::List(elements));
+
+    runtime.push_onto_stack(built_list);
+}
+
 
 pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
     runtime.set_pc(destination);
@@ -425,14 +566,27 @@ pub fn execute_program(runtime: &mut Runtime, program: Program) {
             }
             Instruction::LoadName(name) 
                 => handle_load_name(runtime, *name),
+            
+            Instruction::LoadGlobal(name) 
+                => handle_load_global(runtime, name),
+
+            Instruction::LoadAttr(name) 
+                => handle_load_attr(runtime, name),
             Instruction::StoreName(name) 
                 => handle_store_name(runtime, *name),
             Instruction::BinaryAdd => handle_binary_add(runtime),
             Instruction::BinaryModulus => handle_binary_mod(runtime),
+            Instruction::BinarySubtract => handle_binary_sub(runtime),
+            Instruction::BinaryMultiply => handle_binary_mul(runtime),
             Instruction::CompareLessThan => handle_compare_less(runtime),
+            Instruction::CompareLessEquals => handle_compare_less_eq(runtime),
             Instruction::CompareGreaterThan => handle_compare_greater(runtime),
+            Instruction::CompareGreaterEquals => handle_compare_greater_eq(runtime),
             Instruction::CompareEquals => handle_compare_equals(runtime),
-                Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
+            Instruction::CompareNotEquals => handle_compare_not_eq(runtime),
+            Instruction::BinaryTrueDivision => handle_binary_truediv(runtime),
+            Instruction::JumpIfFalseAndPopStack(destination) => advance_pc = !handle_jump_if_false_pop(runtime, *destination),
+            Instruction::BuildList{number_elements} => handle_build_list(runtime, *number_elements),
             Instruction::JumpUnconditional(destination) =>{
                 handle_jump_unconditional(runtime, *destination);
                 advance_pc = false;

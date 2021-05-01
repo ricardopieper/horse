@@ -198,6 +198,18 @@ fn to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
+macro_rules! create_unary_function {
+    ($name:tt, $param_a:tt, $func:expr) => {
+        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+            check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+            let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap()).take_int();
+            let $param_a = self_data;
+            runtime.allocate_type_byaddr_raw(runtime.builtin_type_addrs.int, BuiltInTypeData::Int($func))
+        }
+    };
+}
+create_unary_function!(negation, a, if a == 1 {0} else {1});
+
 pub fn register_boolean_type(runtime: &mut Runtime) -> MemoryAddress {
     //bool inherits from int
     
@@ -208,6 +220,7 @@ pub fn register_boolean_type(runtime: &mut Runtime) -> MemoryAddress {
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__or__", or_method);
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__xor__", xor_method);
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__not__", not_method);
+    runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__neg__", negation);
 
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__bool__", to_boolean);
     runtime.register_bounded_func(BUILTIN_MODULE, "bool", "__str__", to_str);

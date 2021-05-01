@@ -29,7 +29,6 @@ fn main() {
             let cell = data.data.unwrap();
             println!("Data at index {} is: {:?}", index, cell);
         }*/
-
         return;
     }
 

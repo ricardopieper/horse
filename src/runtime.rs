@@ -2,13 +2,12 @@ use crate::float::Float;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use smallvec::{SmallVec, smallvec};
 
 /* this is done by somewhat following the python data model in https://docs.python.org/3/reference/datamodel.html */
 
-pub type MemoryAddress = *mut MemoryCell;
+pub type MemoryAddress = *mut PyObject;
 
-pub const BUILTIN_MODULE: &'static str = "__builtin__";
+pub const BUILTIN_MODULE: &'static str = "__builtins__";
 
 pub struct PyCallable {
     pub code: Box<dyn Fn(&mut Runtime, CallParams) -> MemoryAddress>,
@@ -25,6 +24,7 @@ pub enum BuiltInTypeData {
     Int(i128),
     Float(Float),
     String(String),
+    List(Vec<MemoryAddress>),
 }
 
 impl BuiltInTypeData {
@@ -45,6 +45,20 @@ impl BuiltInTypeData {
     pub fn take_string(&self) -> &String {
         match self {
             BuiltInTypeData::String(s) => s,
+            _ => panic!("Tried to transform something into string unexpectedly"),
+        }
+    }
+
+    pub fn take_list(&self) -> &Vec<MemoryAddress> {
+        match self {
+            BuiltInTypeData::List(s) => s,
+            _ => panic!("Tried to transform something into string unexpectedly"),
+        }
+    }
+
+    pub fn take_list_mut(&mut self) -> &mut Vec<MemoryAddress> {
+        match self {
+            BuiltInTypeData::List(s) => s,
             _ => panic!("Tried to transform something into string unexpectedly"),
         }
     }
@@ -78,6 +92,24 @@ pub enum PyObjectStructure {
 pub struct PyObject {
     pub type_addr: MemoryAddress,
     pub structure: PyObjectStructure,
+    pub properties: HashMap<String, MemoryAddress>,
+    pub is_const: bool,
+}
+
+impl PyObject {
+    pub fn try_get_builtin(&self) -> Option<&BuiltInTypeData> {
+        match &self.structure {
+            PyObjectStructure::Object {
+                raw_data, refcount: _
+            } => {
+                return Some(raw_data);
+            },
+            _ => {
+                return None;
+            }
+        }
+    }
+   
 }
 
 pub struct CallParams<'a> {
@@ -87,174 +119,23 @@ pub struct CallParams<'a> {
     pub params: &'a [MemoryAddress],
 }
 
-pub struct MemoryCell {
-    pub data: Option<PyObject>,
-    pub valid: bool,
-    pub is_const: bool,
-}
-
-pub struct MemoryStatistics {
-    pub allocated_slots: usize,
-    pub slots_in_use: usize,
-}
-/*
-pub struct Memory {
-    pub memory: Vec<MemoryCell>,
-    //gc graph stores: Key = memory addresses, Values = Other adresses that point to that memory addr
-    //Every memory address has an entry here
-    //pub gc_graph: HashMap<MemoryAddress, Vec<MemoryAddress>>,
-    pub recently_deallocated_indexes: Vec<MemoryAddress>,
-}
-
-impl Memory {
-    pub fn get(&self, address: MemoryAddress) -> &PyObject {
-        let cell = &self.memory[address];
-        if cell.valid {
-            return &cell.data.as_ref().unwrap();
-        } else {
-            panic!("Attempt to read from non-valid memory address {}", address);
-        }
-    }
-    pub fn get_mut(&mut self, address: MemoryAddress) -> &mut PyObject {
-        let cell = &mut self.memory[address];
-        if cell.valid {
-            return cell.data.as_mut().unwrap();
-        } else {
-            panic!("Attempt to read from non-valid memory address {}", address);
-        }
-    }
-
-    pub fn make_const(&mut self, address: MemoryAddress) {
-        let cell = &mut self.memory[address];
-        cell.is_const = true;
-    }
-
-    pub fn deallocate(&mut self, address: MemoryAddress) {
-        let cell = &mut self.memory[address];
-        if cell.is_const {
-            return;
-        };
-        if cell.valid {
-            cell.valid = false;
-        } else {
-            panic!("Attempt to dealloate already invalid memory at address in non-valid memory address {}", address)
-        }
-
-        self.recently_deallocated_indexes.push(address);
-    }
-
-    pub fn allocate_and_write(&mut self, data: PyObject) -> MemoryAddress {
-        let dealloc = self.recently_deallocated_indexes.pop();
-        match dealloc {
-            Some(address) => {
-                let mut cell = &mut self.memory[address];
-                debug_assert!(!cell.is_const);
-                if cell.valid {
-                    panic!(
-                        "Attempt to allocate onto already occupied address {}",
-                        address
-                    )
-                } else {
-                    if let PyObjectStructure::Object{raw_data, refcount: _} = &mut cell.data.as_mut().unwrap().structure {
-                        if let PyObjectStructure::Object{raw_data: new_data, refcount: _} = data.structure {
-                            *raw_data = new_data;
-                        } else {
-                            cell.data = Some(data);
-                        }
-                    } else {
-                        cell.data = Some(data);
-                    }
-                    cell.valid = true;
-                }
-                return address;
-            }
-            None => {
-                self.memory.push(MemoryCell {
-                    data: Some(data),
-                    valid: true,
-                    is_const: false,
-                });
-                return self.memory.len() - 1;
-            }
-        };
-    }
-
-    pub fn allocate_and_write_builtin(&mut self, type_addr: MemoryAddress, data: BuiltInTypeData) -> MemoryAddress {
-        let dealloc = self.recently_deallocated_indexes.pop();
-        match dealloc {
-            Some(address) => {
-                let mut cell = &mut self.memory[address];
-                debug_assert!(!cell.is_const);
-                if cell.valid {
-                    panic!(
-                        "Attempt to allocate onto already occupied address {}",
-                        address
-                    )
-                } else {
-                    if let PyObjectStructure::Object{raw_data, refcount} = &mut cell.data.as_mut().unwrap().structure {
-                        *raw_data = data;
-                        *refcount = 0;
-                    } else {
-                        cell.data = Some(PyObject {
-                            type_addr, 
-                            structure: PyObjectStructure::Object {
-                                raw_data: data,
-                                refcount: 0
-                            }
-                        })
-                    }
-                    cell.valid = true;
-                }
-                return address;
-            }
-            None => {
-                self.memory.push(MemoryCell {
-                    data: Some(PyObject {
-                        type_addr, 
-                        structure: PyObjectStructure::Object {
-                            raw_data: data,
-                            refcount: 0
-                        }
-                    }),
-                    valid: true,
-                    is_const: false,
-                });
-                return self.memory.len() - 1;
-            }
-        };
-    }
-
-    pub fn get_statistics(&self) -> MemoryStatistics {
-        let allocated_slots = self.memory.len();
-        let slots_in_use = self.memory.iter().filter(|x| x.valid).count();
-        MemoryStatistics {
-            allocated_slots,
-            slots_in_use,
-        }
-    }
-}*/
-
 pub struct Memory {
     pub recently_deallocated_addr: Vec<MemoryAddress>,
 }
 
 impl Memory {
     pub fn get(&self, address: MemoryAddress) -> &PyObject {
-        let memory_cell = unsafe { &*address as &MemoryCell };
-        if memory_cell.valid {
-            return memory_cell.data.as_ref().unwrap();
-        } else {
-            panic!("Attempt to read from non-valid memory address {:p}", address);
+         if address.is_null() {
+            panic!("Attempt to read from non-valid memory address null");
         }
+        return unsafe { &*address };
     }
 
     pub fn get_mut(&mut self, address: MemoryAddress) -> &mut PyObject {
-        let memory_cell: &mut MemoryCell = unsafe { &mut *address };
-        if memory_cell.valid {
-            return memory_cell.data.as_mut().unwrap();
-        } else {
-            panic!("Attempt to read from non-valid memory address {:p}", address);
+         if address.is_null() {
+            panic!("Attempt to read from non-valid memory address null");
         }
+        return unsafe { &mut *address };
     }
 
     pub fn make_const(&mut self, address: MemoryAddress) {
@@ -262,15 +143,15 @@ impl Memory {
     }
 
     pub fn deallocate(&mut self, address: MemoryAddress) {
-        let memory_cell = unsafe { &mut *address };
-        if memory_cell.is_const {
-            return;
-        };
-        if memory_cell.valid {
-            memory_cell.valid = false;
-        } else {
-            panic!("Attempt to deallocate already invalid memory at address in non-valid memory address {:p}", address)
+        if address.is_null() {
+            panic!("Null pointer!");
         }
+        unsafe {
+            if (*address).is_const {
+                return;
+            }
+        }
+        //do not deallocate yet! Could make a new box from raw and let it go out of scope
 
         self.recently_deallocated_addr.push(address);
     }
@@ -279,13 +160,15 @@ impl Memory {
         let dealloc = self.recently_deallocated_addr.pop();
         match dealloc {
             Some(address) => { 
-                unsafe { (*address).data = Some(data) };
+                unsafe { 
+                    *address = data;
+                };
                 return address;
             },
             None => {
-                let boxed = Box::new(MemoryCell { is_const: false, valid: true, data: Some(data)} );
+                let boxed = Box::new(data);
                 let mutref = Box::leak(boxed); //hehe
-                return mutref as *mut MemoryCell;
+                return mutref as *mut PyObject;
             }
         }
     }
@@ -294,29 +177,23 @@ impl Memory {
         let dealloc = self.recently_deallocated_addr.pop();
         match dealloc {
             Some(address) => {
-                let mut cell = unsafe { &mut *address };
-                debug_assert!(!cell.is_const);
-                if cell.valid {
-                    panic!(
-                        "Attempt to allocate onto already occupied address {:?}",
-                        address
-                    )
+                let py_obj = unsafe { &mut *address };
+                debug_assert!(!py_obj.is_const);
+                if let PyObjectStructure::Object{raw_data, refcount} = &mut py_obj.structure {
+                    *raw_data = data;
+                    *refcount = 0;
                 } else {
-                    if let PyObjectStructure::Object{raw_data, refcount} = &mut cell.data.as_mut().unwrap().structure {
-                        *raw_data = data;
-                        *refcount = 0;
-                    } else {
-                        cell.data = Some(PyObject {
-                            type_addr, 
-                            structure: PyObjectStructure::Object {
-                                raw_data: data,
-                                refcount: 0
-                            }
-                        })
-                    }
-                    cell.valid = true;
+                    *py_obj = PyObject {
+                        type_addr, 
+                        structure: PyObjectStructure::Object {
+                            raw_data: data,
+                            refcount: 0
+                        },
+                        properties: HashMap::new(),
+                        is_const: false
+                    };
                 }
-                address
+                return address;
             }
             None => {
                 self.allocate_and_write(PyObject {
@@ -324,7 +201,9 @@ impl Memory {
                     structure: PyObjectStructure::Object {
                         raw_data: data,
                         refcount: 0
-                    }
+                    },
+                    properties: HashMap::new(),
+                    is_const: false
                 })
             }
         }
@@ -354,6 +233,7 @@ pub struct BuiltinTypeAddresses {
     pub float: MemoryAddress,
     pub boolean: MemoryAddress,
     pub string: MemoryAddress,
+    pub list: MemoryAddress,
     pub true_val: MemoryAddress,
     pub false_val: MemoryAddress,
 }
@@ -385,81 +265,99 @@ impl Runtime {
             program_consts: vec![],
             prog_counter: Cell::new(0),
             builtin_type_addrs: BuiltinTypeAddresses {
-                int: 0 as *mut MemoryCell,
-                float: 0 as *mut MemoryCell,
-                boolean: 0 as *mut MemoryCell,
-                string: 0 as *mut MemoryCell,
-                true_val: 0 as *mut MemoryCell,
-                false_val: 0 as *mut MemoryCell,
+                int: std::ptr::null_mut(),
+                float: std::ptr::null_mut(),
+                boolean: std::ptr::null_mut(),
+                string: std::ptr::null_mut(),
+                list: std::ptr::null_mut(),
+                true_val: std::ptr::null_mut(),
+                false_val: std::ptr::null_mut(),
             },
         };
+        
 
         let type_type = interpreter.allocate_and_write(PyObject {
-            type_addr: 0 as *mut MemoryCell,
+            type_addr: std::ptr::null_mut(),
+            properties: HashMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("type"),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
                 supertype: None,
             },
+            is_const: false
         });
 
         let none_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("NoneType"),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
                 supertype: None,
             },
+            is_const: false
         });
 
         let none_value = interpreter.allocate_and_write(PyObject {
             type_addr: none_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::None,
+            is_const: false
         });
 
         let not_implemented_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("NotImplemented"),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
                 supertype: None,
             },
+            is_const: false
         });
 
         let not_implemented_value = interpreter.allocate_and_write(PyObject {
             type_addr: not_implemented_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::NotImplemented,
+            is_const: false
         });
 
         let callable_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("function"),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
                 supertype: None,
             },
+            is_const: false
         });
 
         let module_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("module"),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
                 supertype: None,
             },
+            is_const: false
         });
 
         let builtin_module_obj = interpreter.allocate_and_write(PyObject {
             type_addr: module_type,
+            properties: HashMap::new(),
             structure: PyObjectStructure::Module {
                 name: BUILTIN_MODULE.to_string(),
                 objects: HashMap::new(),
             },
+            is_const: false
         });
 
         interpreter.make_const(type_type);
@@ -515,14 +413,15 @@ impl Runtime {
         supertype: Option<MemoryAddress>,
     ) -> MemoryAddress {
         let created_type = PyObject {
+            properties: HashMap::new(),
             type_addr: self.special_values[&SpecialValue::Type],
             structure: PyObjectStructure::Type {
                 name: name.to_string(),
                 methods: HashMap::new(),
                 functions: HashMap::new(),
-
                 supertype,
             },
+            is_const: false
         };
         let type_address = self.allocate_and_write(created_type);
         let module_addr = *self.modules.get(module).unwrap();
@@ -567,17 +466,27 @@ impl Runtime {
         }
     }
 
-    pub fn find_module(&self, module: &str) -> &PyObject {
-        let module_addr = self.modules.get(module).unwrap();
-        return self.get_pyobj_byaddr(*module_addr);
+    pub fn find_module(&self, module: &str) -> Option<MemoryAddress> {
+        println!("Modules: {:?}", self.modules);
+        return self.modules.get(module).map(|addr: &MemoryAddress| *addr);
     }
 
     pub fn find_in_module(&self, module: &str, name: &str) -> Option<MemoryAddress> {
-        let module_pyobj = self.find_module(module);
+        let module_addr = self.find_module(module).unwrap();
+        return self.find_in_module_addr(module_addr, name)
+    }
+
+    pub fn find_in_module_addr(&self, module_addr: MemoryAddress, name: &str) -> Option<MemoryAddress> {
+        let module_pyobj = self.get_pyobj_byaddr(module_addr);
         match &module_pyobj.structure {
             PyObjectStructure::Module { name: _, objects } => objects.get(name).map(|addr| *addr),
             _ => panic!("Object is not module: {:?}", module_pyobj.structure),
         }
+    }
+
+    pub fn get_obj_property(&self, addr: MemoryAddress, attr_name: &str) -> Option<MemoryAddress> {
+        let pyobj = self.get_pyobj_byaddr(addr);
+        return pyobj.properties.get(attr_name).map(|addr| *addr)
     }
 
     pub fn get_pyobj_byaddr(&self, addr: MemoryAddress) -> &PyObject {
@@ -619,7 +528,7 @@ impl Runtime {
         }
     }
 
-    pub fn get_type_method_addr_byname(
+    pub fn get_method_addr_byname(
         &self,
         type_addr: MemoryAddress,
         method_name: &str,
@@ -636,7 +545,7 @@ impl Runtime {
                 Some(addr) => Some(*addr),
                 None => match supertype {
                     Some(supertype_addr) => {
-                        self.get_type_method_addr_byname(*supertype_addr, method_name)
+                        self.get_method_addr_byname(*supertype_addr, method_name)
                     }
                     None => None,
                 },
@@ -686,8 +595,10 @@ impl Runtime {
         structure: PyObjectStructure,
     ) -> MemoryAddress {
         let obj = PyObject {
+            properties: HashMap::new(),
             type_addr,
             structure,
+            is_const: false
         };
         return self.allocate_and_write(obj);
     }
@@ -754,6 +665,9 @@ impl Runtime {
         }
     }
 
+
+  
+
     pub fn get_raw_data_of_pyobj(&self, addr: MemoryAddress) -> &BuiltInTypeData {
         let pyobj = self.get_pyobj_byaddr(addr);
         if let PyObjectStructure::Object {
@@ -770,6 +684,22 @@ impl Runtime {
         }
     }
 
+    pub fn get_raw_data_of_pyobj_mut(&mut self, addr: MemoryAddress) -> &mut BuiltInTypeData {
+        let pyobj = self.get_pyobj_byaddr_mut(addr);
+        
+        if let PyObjectStructure::Object {
+            raw_data,
+            refcount: _,
+        } = &mut pyobj.structure
+        {
+            return raw_data;
+        } else {
+            panic!(
+                "get_raw_data_of_pyobj_mut cannot be called non-object"
+            )
+        }
+    }
+
     unsafe fn very_bad_function<T>(reference: &T) -> &mut T {
         let const_ptr = reference as *const T;
         let mut_ptr = const_ptr as *mut T;
@@ -777,11 +707,11 @@ impl Runtime {
     }
 
     pub fn callable_call(
-        &mut self,
+        &self,
         callable_addr: MemoryAddress,
         call_params: CallParams,
     ) -> MemoryAddress {
-        //TODO: I know this is *bad*, but the fields I use here (mostly native callable code) are *not* changed
+        //TODO: I know this is *bad bad very bad*, but the fields I use here (mostly native callable code) are *not* changed
         //during normal execution of the program. For now this is unsafe but *very* practical.
         //Maybe I should store the callables elsewhere, so that I start the code borrow outside of the Runtime borrow?
 
@@ -796,13 +726,13 @@ impl Runtime {
     }
 
     pub fn call_method(
-        &mut self,
+        &self,
         addr: MemoryAddress,
         method_name: &str,
         params: &[MemoryAddress],
     ) -> Option<MemoryAddress> {
         let pyobj = self.get_pyobj_byaddr(addr);
-        self.get_type_method_addr_byname(pyobj.type_addr, method_name)
+        self.get_method_addr_byname(pyobj.type_addr, method_name)
             .map(move |method_addr| {
                 self.callable_call(
                     method_addr,
@@ -927,7 +857,7 @@ impl Runtime {
             current_frame.values[name] = addr
         } else if current_frame.values.len() < name {
             while current_frame.values.len() < name {
-                current_frame.values.push(0 as *mut MemoryCell);
+                current_frame.values.push(std::ptr::null_mut());
             }
             current_frame.values.push(addr);
         }
