@@ -1,12 +1,12 @@
 use crate::runtime::Runtime;
 
-pub mod int_type;
-pub mod float_type;
 pub mod boolean_type;
-pub mod string_type;
-pub mod builtin_math;
-pub mod list_type;
 pub mod builtin_functions;
+pub mod builtin_math;
+pub mod float_type;
+pub mod int_type;
+pub mod list_type;
+pub mod string_type;
 
 pub fn register_builtins(runtime: &mut Runtime) {
     int_type::register_int_type(runtime);

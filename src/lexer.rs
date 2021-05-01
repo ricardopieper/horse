@@ -20,7 +20,7 @@ pub enum Operator {
     Greater,
     GreaterEquals,
     Less,
-    LessEquals
+    LessEquals,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -45,7 +45,7 @@ pub enum Token {
     OpenArrayBracket,
     CloseArrayBracket,
     MemberAccessor,
-    Indentation
+    Indentation,
 }
 
 #[derive(Debug)]
@@ -101,10 +101,8 @@ impl PartialToken {
                         _ => panic!("Error parsing integer value {}. Should have generated a tokenizer error. This is a bug.", s)
                     }
                 }
-            },
-            Self::String(s) => {
-                Token::LiteralString(s)
             }
+            Self::String(s) => Token::LiteralString(s),
             Self::Operator(s) => match s.as_str() {
                 "+" => Token::Operator(Operator::Plus),
                 "-" => Token::Operator(Operator::Minus),
@@ -214,7 +212,7 @@ impl Tokenizer {
     fn eat_string_literal(&mut self) -> bool {
         let stop = self.cur();
         if stop != '\'' && stop != '"' {
-            return false
+            return false;
         }
         self.next();
         let mut is_escaping = false;
@@ -224,15 +222,14 @@ impl Tokenizer {
             if cur == '\\' && !is_escaping {
                 is_escaping = true;
                 self.next();
-                continue
+                continue;
             }
             if is_escaping {
                 if stop == '\'' && cur == '\'' {
-                    self.eater_buf.push( '\'');
+                    self.eater_buf.push('\'');
                 } else if stop == '"' && cur == '"' {
-                    self.eater_buf.push( '"');
-                }
-                else if cur == '\\' {
+                    self.eater_buf.push('"');
+                } else if cur == '\\' {
                     self.eater_buf.push('\\');
                 } else {
                     panic!("cannot escape char {}", cur);
@@ -297,7 +294,8 @@ impl Tokenizer {
 
     pub fn tokenize(mut self) -> Result<Vec<Token>, String> {
         let operators = &[
-            "+", "-", "*", "%", "/", "<<", ">>", "<=", ">=", ">", "<", "!=", "==", "=", "^", "(", ")",
+            "+", "-", "*", "%", "/", "<<", ">>", "<=", ">=", ">", "<", "!=", "==", "=", "^", "(",
+            ")",
         ];
         while self.can_go() {
             self.commit_current_token();
@@ -315,34 +313,28 @@ impl Tokenizer {
                 self.cur_partial_token = PartialToken::Comma;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur() == ':' {
+            } else if self.cur() == ':' {
                 self.cur_partial_token = PartialToken::Colon;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur() == '[' {
+            } else if self.cur() == '[' {
                 self.cur_partial_token = PartialToken::OpenArrayBracket;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur() == ']' {
+            } else if self.cur() == ']' {
                 self.cur_partial_token = PartialToken::CloseArrayBracket;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur() == '.' {
+            } else if self.cur() == '.' {
                 self.cur_partial_token = PartialToken::MemberAccessor;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.cur() == '\n' {
+            } else if self.cur() == '\n' {
                 self.cur_partial_token = PartialToken::NewLine;
                 self.commit_current_token();
                 self.next();
-            }
-            else if self.index > 0 && self.cur_offset(-1) == '\n' && self.cur() == ' ' {
-                let mut current_spaces = 0; 
+            } else if self.index > 0 && self.cur_offset(-1) == '\n' && self.cur() == ' ' {
+                let mut current_spaces = 0;
                 while self.can_go() && self.cur() == ' ' {
                     current_spaces = current_spaces + 1;
                     self.next();
@@ -354,9 +346,7 @@ impl Tokenizer {
                 for _i in 0..indents {
                     self.final_result.push(Token::Indentation);
                 }
-
-            }
-            else if self.cur().is_whitespace() {
+            } else if self.cur().is_whitespace() {
                 //if it's whitespace and there's a pending token, add it
                 self.next();
             } else if let Some(s) = self.match_first_and_advance(operators) {
@@ -372,8 +362,7 @@ impl Tokenizer {
                 self.commit_current_token();
                 self.reset_eater_buffer();
                 self.next();
-            }
-            else {
+            } else {
                 return Err(format!("Unrecognized token {}", self.cur()));
             }
         }
@@ -654,55 +643,37 @@ mod tests {
     #[test]
     fn string_literal() -> Result<(), String> {
         let result = tokenize("'abc'")?;
-        assert_eq!(
-            result,
-            [
-                Token::LiteralString(String::from("abc"))
-            ]
-        );
+        assert_eq!(result, [Token::LiteralString(String::from("abc"))]);
         Ok(())
     }
 
     #[test]
     fn string_literal_doublequotes() -> Result<(), String> {
         let result = tokenize("\"abc\"")?;
-        assert_eq!(
-            result,
-            [
-                Token::LiteralString(String::from("abc"))
-            ]
-        );
+        assert_eq!(result, [Token::LiteralString(String::from("abc"))]);
         Ok(())
     }
 
     #[test]
     fn string_literal_escapedouble() -> Result<(), String> {
         let result = tokenize("\"a\\\"b\\\"c\"")?;
-        assert_eq!(
-            result,
-            [
-                Token::LiteralString(String::from("a\"b\"c"))
-            ]
-        );
+        assert_eq!(result, [Token::LiteralString(String::from("a\"b\"c"))]);
         Ok(())
     }
 
     #[test]
     fn string_literal_escapesingle() -> Result<(), String> {
         let result = tokenize("\'a\\'b\\'c\'")?;
-        assert_eq!(
-            result,
-            [
-                Token::LiteralString(String::from("a'b'c"))
-            ]
-        );
+        assert_eq!(result, [Token::LiteralString(String::from("a'b'c"))]);
         Ok(())
     }
 
     #[test]
     fn tokenize_if() -> Result<(), String> {
-        let result = tokenize("if x == 0:
-    x = x + 1")?;
+        let result = tokenize(
+            "if x == 0:
+    x = x + 1",
+        )?;
         assert_eq!(
             result,
             [
@@ -750,6 +721,4 @@ mod tests {
         );
         Ok(())
     }
-
-
 }

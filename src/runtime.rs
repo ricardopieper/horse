@@ -100,16 +100,16 @@ impl PyObject {
     pub fn try_get_builtin(&self) -> Option<&BuiltInTypeData> {
         match &self.structure {
             PyObjectStructure::Object {
-                raw_data, refcount: _
+                raw_data,
+                refcount: _,
             } => {
                 return Some(raw_data);
-            },
+            }
             _ => {
                 return None;
             }
         }
     }
-   
 }
 
 pub struct CallParams<'a> {
@@ -125,21 +125,21 @@ pub struct Memory {
 
 impl Memory {
     pub fn get(&self, address: MemoryAddress) -> &PyObject {
-         if address.is_null() {
+        if address.is_null() {
             panic!("Attempt to read from non-valid memory address null");
         }
         return unsafe { &*address };
     }
 
     pub fn get_mut(&mut self, address: MemoryAddress) -> &mut PyObject {
-         if address.is_null() {
+        if address.is_null() {
             panic!("Attempt to read from non-valid memory address null");
         }
         return unsafe { &mut *address };
     }
 
     pub fn make_const(&mut self, address: MemoryAddress) {
-        unsafe {(*address).is_const = true};
+        unsafe { (*address).is_const = true };
     }
 
     pub fn deallocate(&mut self, address: MemoryAddress) {
@@ -159,12 +159,12 @@ impl Memory {
     pub fn allocate_and_write(&mut self, data: PyObject) -> MemoryAddress {
         let dealloc = self.recently_deallocated_addr.pop();
         match dealloc {
-            Some(address) => { 
-                unsafe { 
+            Some(address) => {
+                unsafe {
                     *address = data;
                 };
                 return address;
-            },
+            }
             None => {
                 let boxed = Box::new(data);
                 let mutref = Box::leak(boxed); //hehe
@@ -173,48 +173,48 @@ impl Memory {
         }
     }
 
-    pub fn allocate_and_write_builtin(&mut self, type_addr: MemoryAddress, data: BuiltInTypeData) -> MemoryAddress {
+    pub fn allocate_and_write_builtin(
+        &mut self,
+        type_addr: MemoryAddress,
+        data: BuiltInTypeData,
+    ) -> MemoryAddress {
         let dealloc = self.recently_deallocated_addr.pop();
         match dealloc {
             Some(address) => {
                 let py_obj = unsafe { &mut *address };
                 debug_assert!(!py_obj.is_const);
-                if let PyObjectStructure::Object{raw_data, refcount} = &mut py_obj.structure {
+                if let PyObjectStructure::Object { raw_data, refcount } = &mut py_obj.structure {
                     *raw_data = data;
                     *refcount = 0;
                 } else {
                     *py_obj = PyObject {
-                        type_addr, 
+                        type_addr,
                         structure: PyObjectStructure::Object {
                             raw_data: data,
-                            refcount: 0
+                            refcount: 0,
                         },
                         properties: HashMap::new(),
-                        is_const: false
+                        is_const: false,
                     };
                 }
                 return address;
             }
-            None => {
-                self.allocate_and_write(PyObject {
-                    type_addr, 
-                    structure: PyObjectStructure::Object {
-                        raw_data: data,
-                        refcount: 0
-                    },
-                    properties: HashMap::new(),
-                    is_const: false
-                })
-            }
+            None => self.allocate_and_write(PyObject {
+                type_addr,
+                structure: PyObjectStructure::Object {
+                    raw_data: data,
+                    refcount: 0,
+                },
+                properties: HashMap::new(),
+                is_const: false,
+            }),
         }
     }
-    
 }
-
 
 pub struct StackFrame {
     pub values: Vec<MemoryAddress>,
-    pub stack: Vec<MemoryAddress>
+    pub stack: Vec<MemoryAddress>,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -274,7 +274,6 @@ impl Runtime {
                 false_val: std::ptr::null_mut(),
             },
         };
-        
 
         let type_type = interpreter.allocate_and_write(PyObject {
             type_addr: std::ptr::null_mut(),
@@ -285,7 +284,7 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype: None,
             },
-            is_const: false
+            is_const: false,
         });
 
         let none_type = interpreter.allocate_and_write(PyObject {
@@ -297,14 +296,14 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype: None,
             },
-            is_const: false
+            is_const: false,
         });
 
         let none_value = interpreter.allocate_and_write(PyObject {
             type_addr: none_type,
             properties: HashMap::new(),
             structure: PyObjectStructure::None,
-            is_const: false
+            is_const: false,
         });
 
         let not_implemented_type = interpreter.allocate_and_write(PyObject {
@@ -316,14 +315,14 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype: None,
             },
-            is_const: false
+            is_const: false,
         });
 
         let not_implemented_value = interpreter.allocate_and_write(PyObject {
             type_addr: not_implemented_type,
             properties: HashMap::new(),
             structure: PyObjectStructure::NotImplemented,
-            is_const: false
+            is_const: false,
         });
 
         let callable_type = interpreter.allocate_and_write(PyObject {
@@ -335,7 +334,7 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype: None,
             },
-            is_const: false
+            is_const: false,
         });
 
         let module_type = interpreter.allocate_and_write(PyObject {
@@ -347,7 +346,7 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype: None,
             },
-            is_const: false
+            is_const: false,
         });
 
         let builtin_module_obj = interpreter.allocate_and_write(PyObject {
@@ -357,7 +356,7 @@ impl Runtime {
                 name: BUILTIN_MODULE.to_string(),
                 objects: HashMap::new(),
             },
-            is_const: false
+            is_const: false,
         });
 
         interpreter.make_const(type_type);
@@ -421,7 +420,7 @@ impl Runtime {
                 functions: HashMap::new(),
                 supertype,
             },
-            is_const: false
+            is_const: false,
         };
         let type_address = self.allocate_and_write(created_type);
         let module_addr = *self.modules.get(module).unwrap();
@@ -472,10 +471,14 @@ impl Runtime {
 
     pub fn find_in_module(&self, module: &str, name: &str) -> Option<MemoryAddress> {
         let module_addr = self.find_module(module).unwrap();
-        return self.find_in_module_addr(module_addr, name)
+        return self.find_in_module_addr(module_addr, name);
     }
 
-    pub fn find_in_module_addr(&self, module_addr: MemoryAddress, name: &str) -> Option<MemoryAddress> {
+    pub fn find_in_module_addr(
+        &self,
+        module_addr: MemoryAddress,
+        name: &str,
+    ) -> Option<MemoryAddress> {
         let module_pyobj = self.get_pyobj_byaddr(module_addr);
         match &module_pyobj.structure {
             PyObjectStructure::Module { name: _, objects } => objects.get(name).map(|addr| *addr),
@@ -485,7 +488,7 @@ impl Runtime {
 
     pub fn get_obj_property(&self, addr: MemoryAddress, attr_name: &str) -> Option<MemoryAddress> {
         let pyobj = self.get_pyobj_byaddr(addr);
-        return pyobj.properties.get(attr_name).map(|addr| *addr)
+        return pyobj.properties.get(attr_name).map(|addr| *addr);
     }
 
     pub fn get_pyobj_byaddr(&self, addr: MemoryAddress) -> &PyObject {
@@ -597,7 +600,7 @@ impl Runtime {
             properties: HashMap::new(),
             type_addr,
             structure,
-            is_const: false
+            is_const: false,
         };
         return self.allocate_and_write(obj);
     }
@@ -616,10 +619,7 @@ impl Runtime {
         type_addr: MemoryAddress,
         raw_data: BuiltInTypeData,
     ) -> MemoryAddress {
-        return self.memory.allocate_and_write_builtin(
-            type_addr,
-            raw_data,
-        );
+        return self.memory.allocate_and_write_builtin(type_addr, raw_data);
     }
 
     pub fn create_callable_pyobj(
@@ -664,9 +664,6 @@ impl Runtime {
         }
     }
 
-
-  
-
     pub fn get_raw_data_of_pyobj(&self, addr: MemoryAddress) -> &BuiltInTypeData {
         let pyobj = self.get_pyobj_byaddr(addr);
         if let PyObjectStructure::Object {
@@ -685,7 +682,6 @@ impl Runtime {
 
     pub fn get_raw_data_of_pyobj_mut(&mut self, addr: MemoryAddress) -> &mut BuiltInTypeData {
         let pyobj = self.get_pyobj_byaddr_mut(addr);
-        
         if let PyObjectStructure::Object {
             raw_data,
             refcount: _,
@@ -693,9 +689,7 @@ impl Runtime {
         {
             return raw_data;
         } else {
-            panic!(
-                "get_raw_data_of_pyobj_mut cannot be called non-object"
-            )
+            panic!("get_raw_data_of_pyobj_mut cannot be called non-object")
         }
     }
 
@@ -828,7 +822,7 @@ impl Runtime {
     }
 
     pub fn top_stack(&self) -> MemoryAddress {
-        return self.get_stack_offset(0)
+        return self.get_stack_offset(0);
     }
 
     pub fn push_onto_stack(&mut self, value: MemoryAddress) {

@@ -21,12 +21,11 @@ impl Ord for Float {
 
 impl Hash for Float {
     fn hash<H>(&self, state: &mut H)
-        where H: Hasher
+    where
+        H: Hasher,
     {
         //until I find another way to store floats in a map key, this unsafe is necessary :(
-        let as_u64: u64 = unsafe {
-            mem::transmute(self.0)
-        };
+        let as_u64: u64 = unsafe { mem::transmute(self.0) };
         return as_u64.hash(state);
     }
 }

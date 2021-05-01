@@ -1,5 +1,5 @@
-use crate::lexer::*;
 use crate::float::*;
+use crate::lexer::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
@@ -13,7 +13,7 @@ pub enum Expr {
     Parenthesized(Box<Expr>),
     UnaryExpression(Operator, Box<Expr>),
     MemberAccess(Box<Expr>, String),
-    Array(Vec<Expr>)
+    Array(Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,7 +494,8 @@ impl Parser {
                 parsed_successfully = true;
                 assert!(
                     !self.is_not_end() || self.cur_is_newline(),
-                    "Newline or EOF expected after standalone expr, instead found {:?}", self.cur()
+                    "Newline or EOF expected after standalone expr, instead found {:?}",
+                    self.cur()
                 );
             }
 
@@ -559,7 +560,6 @@ impl Parser {
                     Token::OpenArrayBracket => {
                         self.new_stack(); //new parsing stack/state
                         self.next(); //move to the first token, out of the open array
-                        
                         if let Token::CloseArrayBracket = self.cur() {
                             self.push_operand(Expr::Array(vec![]));
                         } else {
@@ -619,7 +619,6 @@ impl Parser {
                                     match list_of_exprs {
                                         //try parse stuff
                                         Ok(expressions) => {
-
                                             //commit the result
                                             let popped = self.pop_stack();
                                             let resulting_exprs = expressions.resulting_expr_list;
@@ -651,16 +650,15 @@ impl Parser {
                         let popped = self.operand_stack_mut().pop();
                         let cur_token = self.cur();
                         if let Token::Identifier(name) = cur_token {
-                            
                             let cur_expr = popped.unwrap();
-                            let member_access_expr = Expr::MemberAccess(
-                                Box::new(cur_expr), name.to_string()
-                            );
+                            let member_access_expr =
+                                Expr::MemberAccess(Box::new(cur_expr), name.to_string());
                             self.push_operand(member_access_expr);
                         } else {
-                            return Err(ParsingError::ExprError("Failed parsing member acessor".into()));
+                            return Err(ParsingError::ExprError(
+                                "Failed parsing member acessor".into(),
+                            ));
                         }
-
                     }
                     Token::LiteralInteger(i) => {
                         self.push_operand(Expr::IntegerValue(i));
@@ -937,30 +935,27 @@ while True:
             expression: Expr::BinaryOperation(
                 Box::new(Expr::Variable("x".to_string())),
                 Operator::Less,
-                Box::new(Expr::IntegerValue(1000000))
+                Box::new(Expr::IntegerValue(1000000)),
             ),
-            body: vec![
-                AST::IfStatement {
-                    true_branch: ASTIfStatement {
-                        expression: Expr::BinaryOperation(
-                            Box::new(Expr::BinaryOperation(
-                                Box::new(Expr::Variable("x".to_string())),
-                                Operator::Divide,
-                                Box::new(Expr::IntegerValue(5))
-                            )),
-                            Operator::Equals,
-                            Box::new(Expr::IntegerValue(0))
-                        ),
-                        statements: vec![AST::Break]
-                    },
-                    elifs: vec![],
-                    final_else: None
-                }
-            ],
+            body: vec![AST::IfStatement {
+                true_branch: ASTIfStatement {
+                    expression: Expr::BinaryOperation(
+                        Box::new(Expr::BinaryOperation(
+                            Box::new(Expr::Variable("x".to_string())),
+                            Operator::Divide,
+                            Box::new(Expr::IntegerValue(5)),
+                        )),
+                        Operator::Equals,
+                        Box::new(Expr::IntegerValue(0)),
+                    ),
+                    statements: vec![AST::Break],
+                },
+                elifs: vec![],
+                final_else: None,
+            }],
         }];
         assert_eq!(expected, result);
     }
-
 
     #[test]
     fn if_statement_with_print_after_and_newlines_before_and_after() {
@@ -977,7 +972,6 @@ print(x)
         )
         .unwrap();
 
-        
         let result = parse_ast(tokens);
         let expected = vec![
             AST::IfStatement {
@@ -1052,7 +1046,6 @@ print(x)
 
         let tokens = tokenize(source_replaced.as_str()).unwrap();
 
-        
         let result = parse_ast(tokens);
         let expected = vec![
             AST::IfStatement {
@@ -2124,9 +2117,10 @@ print(y)",
         let tokens = tokenize("[1,2,3]").unwrap();
         let result = parse(tokens);
         let expected = Expr::Array(vec![
-                Expr::IntegerValue(1),
-                Expr::IntegerValue(2),
-                Expr::IntegerValue(3)]);
+            Expr::IntegerValue(1),
+            Expr::IntegerValue(2),
+            Expr::IntegerValue(3),
+        ]);
 
         assert_eq!(expected, result);
     }
@@ -2136,9 +2130,10 @@ print(y)",
         let tokens = tokenize("[\"one\",\"two\",\"3\"]").unwrap();
         let result = parse(tokens);
         let expected = Expr::Array(vec![
-                Expr::StringValue("one".to_string()),
-                Expr::StringValue("two".to_string()),
-                Expr::StringValue("3".to_string())]);
+            Expr::StringValue("one".to_string()),
+            Expr::StringValue("two".to_string()),
+            Expr::StringValue("3".to_string()),
+        ]);
 
         assert_eq!(expected, result);
     }
@@ -2148,10 +2143,11 @@ print(y)",
         let tokens = tokenize("[1, 'two', True, 4.565]").unwrap();
         let result = parse(tokens);
         let expected = Expr::Array(vec![
-                Expr::IntegerValue(1),
-                Expr::StringValue("two".to_string()),
-                Expr::BooleanValue(true),
-                Expr::FloatValue(Float(4.565))]);
+            Expr::IntegerValue(1),
+            Expr::StringValue("two".to_string()),
+            Expr::BooleanValue(true),
+            Expr::FloatValue(Float(4.565)),
+        ]);
 
         assert_eq!(expected, result);
     }
@@ -2160,12 +2156,10 @@ print(y)",
     fn assign_array() {
         let tokens = tokenize("x = [1, 2]").unwrap();
         let result = parse_ast(tokens);
-        let expr = Expr::Array(vec![
-                Expr::IntegerValue(1),
-                Expr::IntegerValue(2)]);
+        let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
         let expected = vec![AST::Assign {
             variable_name: String::from("x"),
-            expression: expr
+            expression: expr,
         }];
         assert_eq!(expected, result);
     }
@@ -2174,11 +2168,10 @@ print(y)",
     fn member_acessor() {
         let tokens = tokenize("obj.prop").unwrap();
         let result = parse_ast(tokens);
-        let expected = vec![AST::StandaloneExpr(
-            Expr::MemberAccess(
-                Box::new(Expr::Variable("obj".into())), 
-                "prop".into())
-        )];
+        let expected = vec![AST::StandaloneExpr(Expr::MemberAccess(
+            Box::new(Expr::Variable("obj".into())),
+            "prop".into(),
+        ))];
         assert_eq!(expected, result);
     }
 }
