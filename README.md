@@ -5,14 +5,21 @@ This is a toy implementation of Python in Rust.
 
 Currently, stuff like this should work:
 
-    x = 0
-    y = 0
-    while x < 10:
-        y = y + 1
-        x = x + 1
-        if x == 5:
-            print(sin(x))
-            break
+    def double(x):
+        return x * 2
+
+    sum = 0
+    current = 1
+    while current < 10:
+        val = double(current)
+        print(val)
+        sum = sum + val
+        current = current + 1
+
+    print("sum should be 90, is " + str(sum))
+
+    proof = 2 + 4 + 6 + 8 + 10 + 12 + 14 + 16 + 18
+    print("proof: "+str(proof))
 
 The math functions in the `math` module were added to the `__builtins__` module for convenience. There is also a 
 `print` function, which takes 1 argument.
