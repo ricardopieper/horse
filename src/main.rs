@@ -1,6 +1,7 @@
 mod lexer;
 mod parser;
-
+mod memory;
+mod datamodel;
 #[macro_use]
 mod runtime;
 mod builtin_types;
@@ -23,12 +24,7 @@ fn main() {
         let ast = parser::parse_ast(tokens.unwrap());
         let program = bytecode::compiler::compile(ast);
         bytecode::interpreter::execute_program(&mut runtime, program);
-
-        /*
-        for (index, data) in runtime.memory.memory.into_iter().enumerate() {
-            let cell = data.data.unwrap();
-            println!("Data at index {} is: {:?}", index, cell);
-        }*/
+       
         return;
     }
 

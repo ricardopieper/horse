@@ -26,7 +26,7 @@ pub struct ASTIfStatement {
 pub enum AST {
     StandaloneExpr(Expr),
     Assign {
-        variable_name: String,
+        path: Vec<String>,
         expression: Expr,
     },
     IfStatement {
@@ -38,7 +38,18 @@ pub enum AST {
         expression: Expr,
         body: Vec<AST>,
     },
+    ForStatement {
+        item_name: String,
+        list_expression: Expr,
+        body: Vec<AST>,
+    },
+    DeclareFunction {
+        function_name: String,
+        parameters: Vec<String>,
+        body: Vec<AST>,
+    },
     Break,
+    Return(Option<Expr>)
 }
 
 impl Expr {
@@ -175,6 +186,7 @@ impl Parser {
     }
 
     fn is_not_end(&self) -> bool {
+        //!self.is_last()
         self.parsing_state.last().unwrap().index < self.tokens.len()
     }
 
@@ -223,22 +235,29 @@ impl Parser {
     }
 
     pub fn parse_assign(&mut self) -> Option<AST> {
-        if let Token::Identifier(id) = self.cur().clone() {
-            self.next();
-            if !self.can_go() {
-                None
+        let mut path = vec![];
+        while let Token::Identifier(id) = self.cur().clone() {
+            path.push(id.clone());
+            if self.is_last() {
+                return None;
             } else {
-                if let Token::Assign = self.cur() {
-                    self.next();
-                    let expr = self.parse_expr().expect("Expected expression after assign");
-                    Some(AST::Assign {
-                        variable_name: id.to_string(),
-                        expression: expr.resulting_expr,
-                    })
-                } else {
-                    None
-                }
+               self.next()
             }
+       
+            if let Token::MemberAccessor = self.cur() {
+                self.next();
+            }
+        }
+        if !self.can_go() {
+            return None;
+        }
+        if let Token::Assign = self.cur() {
+            self.next();
+            let expr = self.parse_expr().expect("Expected expression after assign");
+            Some(AST::Assign {
+                path: path,
+                expression: expr.resulting_expr,
+            })
         } else {
             None
         }
@@ -357,6 +376,124 @@ impl Parser {
         }
     }
 
+    pub fn parse_for_statement(&mut self) -> Option<AST> {
+        if let Token::ForKeyword = self.cur().clone() {
+            self.next();
+            if !self.can_go() {
+                None
+            } else {
+                let variable_name: String;
+                if let Token::Identifier(name) = self.cur() {
+                    variable_name = name.clone();
+                    self.next();
+                } else {
+                    panic!("Expected identifier after for keyword")
+                }
+
+                if let Token::InKeyword = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected in keyword after identifier in for keyword")
+                }
+
+                let expr = self
+                    .parse_expr()
+                    .expect("Expected expr after in keyword in for expression")
+                    .resulting_expr;
+                if let Token::Colon = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected colon after for statement");
+                }
+
+                if let Token::NewLine = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected newline after colon");
+                }
+
+                self.increment_expected_indent();
+                let ast = self.parse_ast().unwrap();
+
+                let for_statement = AST::ForStatement {
+                    item_name: variable_name,
+                    list_expression: expr,
+                    body: ast,
+                };
+                self.decrement_expected_indent();
+
+                return Some(for_statement);
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn parse_def_statement(&mut self, top_level: bool) -> Option<AST> {
+        if let Token::DefKeyword = self.cur().clone() {
+            if top_level && self.get_expected_indent() > 0 {
+                panic!("Functions can only be declared at top level")
+            }
+
+            self.next();
+            if !self.can_go() {
+                None
+            } else {
+                let function_name: String;
+                if let Token::Identifier(name) = self.cur() {
+                    function_name = name.clone();
+                    self.next();
+                } else {
+                    panic!("Expected function identifier")
+                }
+
+                if let Token::OpenParen = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected open paren function name")
+                }
+                let mut params: Vec<String> = vec![];
+
+                while let Token::Identifier(name) = self.cur() {
+                    let param_name = name.clone();
+                    params.push(param_name);
+                    self.next();
+                    if let Token::Comma = self.cur() {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                if let Token::CloseParen = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected close paren after parameters in function declaration")
+                }
+
+                if let Token::Colon = self.cur() {
+                    self.next();
+                } else {
+                    panic!("Expected colon paren after parameters in function declaration")
+                }
+
+                self.increment_expected_indent();
+                let ast = self.parse_ast().unwrap();
+
+                let for_statement = AST::DeclareFunction {
+                    function_name: function_name,
+                    parameters: params,
+                    body: ast,
+                };
+                self.decrement_expected_indent();
+
+                return Some(for_statement);
+            }
+        } else {
+            None
+        }
+    }
+
     //returns the identation level until the first non-whitespace token
     //final state of this function is right at newline, before the identations
     fn skip_whitespace_newline(&mut self) -> usize {
@@ -462,11 +599,84 @@ impl Parser {
 
             if !parsed_successfully {
                 self.new_stack();
+                let expr = self.parse_for_statement();
+                match expr {
+                    Some(ast_for) => {
+                        results.push(ast_for);
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after for block"
+                        );
+                    }
+                    None => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let expr = self.parse_def_statement(true);
+                match expr {
+                    Some(ast_for) => {
+                        results.push(ast_for);
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after for block"
+                        );
+                    }
+                    None => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
                 let tok = self.cur();
                 match tok {
                     Token::BreakKeyword => {
                         results.push(AST::Break);
                         self.next();
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(popped.index);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after if block, got {:?}",
+                            self.cur_opt()
+                        );
+                    }
+                    _ => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let tok = self.cur();
+                match tok {
+                    Token::ReturnKeyword => {
+                        self.next();
+                        if self.can_go() {
+                            let expr = self.parse_expr()?;
+                            results.push(AST::Return(Some(expr.resulting_expr)));
+                        } else {
+                            results.push(AST::Return(None));
+                        }
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
@@ -533,7 +743,7 @@ impl Parser {
             {
                 let tok: Token = self.cur().clone();
                 match tok {
-                    Token::Operator(Operator::OpenParen) => {
+                    Token::OpenParen => {
                         self.new_stack(); //new parsing stack/state
                         self.next(); //move to the first token, out of the OpenParen
 
@@ -592,7 +802,7 @@ impl Parser {
                             self.next();
                             let cur_token = self.cur();
 
-                            if let Token::Operator(Operator::OpenParen) = cur_token {
+                            if let Token::OpenParen = cur_token {
                                 //when we parse a funcion, we need to parse its arguments as well.
                                 //however, the list of arguments is a list of expressions, and those expressions might be
                                 //function calls as well.
@@ -607,7 +817,7 @@ impl Parser {
                                 //like it's part of an expression, then maybe we should just understand that the expression has been finished.
                                 self.next();
 
-                                if let Token::Operator(Operator::CloseParen) = self.cur() {
+                                if let Token::CloseParen = self.cur() {
                                     self.push_operand(Expr::FunctionCall(
                                         identifier_str.clone(),
                                         vec![],
@@ -680,7 +890,7 @@ impl Parser {
                         self.push_operand(Expr::BooleanValue(false));
                         was_operand = true;
                     }
-                    Token::Operator(Operator::CloseParen) | Token::CloseArrayBracket => {
+                    Token::CloseParen | Token::CloseArrayBracket => {
                         not_part_of_expr = true;
                     }
                     Token::Operator(o) => self.push_operator(o),
@@ -871,7 +1081,7 @@ y = x + str(True)",
         let result = parse_ast(tokens);
         let expected = vec![
             AST::Assign {
-                variable_name: String::from("x"),
+                path: vec![String::from("x")],
                 expression: Expr::BinaryOperation(
                     Box::new(Expr::StringValue(String::from("abc"))),
                     Operator::Plus,
@@ -879,7 +1089,7 @@ y = x + str(True)",
                 ),
             },
             AST::Assign {
-                variable_name: String::from("y"),
+                path: vec![String::from("y")],
                 expression: Expr::BinaryOperation(
                     Box::new(Expr::Variable(String::from("x"))),
                     Operator::Plus,
@@ -910,7 +1120,7 @@ while True:
             expression: Expr::BooleanValue(true),
             body: vec![
                 AST::Assign {
-                    variable_name: String::from("x"),
+                    path: vec![String::from("x")],
                     expression: Expr::IntegerValue(1),
                 },
                 AST::Break,
@@ -982,7 +1192,7 @@ print(x)
                         Box::new(Expr::IntegerValue(0)),
                     ),
                     statements: vec![AST::Assign {
-                        variable_name: String::from("x"),
+                        path: vec![String::from("x")],
                         expression: Expr::BinaryOperation(
                             Box::new(Expr::Variable(String::from("x"))),
                             Operator::Plus,
@@ -993,7 +1203,7 @@ print(x)
                 elifs: vec![],
                 final_else: Some(vec![
                     AST::Assign {
-                        variable_name: String::from("x"),
+                        path: vec![String::from("x")],
                         expression: Expr::IntegerValue(999),
                     },
                     AST::IfStatement {
@@ -1057,7 +1267,7 @@ print(x)
                     ),
                     statements: vec![
                         AST::Assign {
-                            variable_name: String::from("x"),
+                            path: vec![String::from("x")],
                             expression: Expr::BinaryOperation(
                                 Box::new(Expr::Variable(String::from("x"))),
                                 Operator::Plus,
@@ -1108,7 +1318,7 @@ print(x)
                     Box::new(Expr::IntegerValue(0)),
                 ),
                 statements: vec![AST::Assign {
-                    variable_name: String::from("x"),
+                    path: vec![String::from("x")],
                     expression: Expr::BinaryOperation(
                         Box::new(Expr::Variable(String::from("x"))),
                         Operator::Plus,
@@ -1140,7 +1350,7 @@ print(x)",
                         Box::new(Expr::IntegerValue(0)),
                     ),
                     statements: vec![AST::Assign {
-                        variable_name: String::from("x"),
+                        path: vec![String::from("x")],
                         expression: Expr::BinaryOperation(
                             Box::new(Expr::Variable(String::from("x"))),
                             Operator::Plus,
@@ -1170,7 +1380,7 @@ print(y)",
         let result = parse_ast(tokens);
         let expected = vec![
             AST::Assign {
-                variable_name: String::from("x"),
+                path: vec![String::from("x")],
                 expression: Expr::BinaryOperation(
                     Box::new(Expr::StringValue(String::from("abc"))),
                     Operator::Plus,
@@ -1178,7 +1388,7 @@ print(y)",
                 ),
             },
             AST::Assign {
-                variable_name: String::from("y"),
+                path: vec![String::from("y")],
                 expression: Expr::BinaryOperation(
                     Box::new(Expr::Variable(String::from("x"))),
                     Operator::Plus,
@@ -1471,9 +1681,9 @@ print(y)",
     fn parse_literal_parens() {
         //(1)
         let result = parse(vec![
-            Token::Operator(Operator::OpenParen),
+            Token::OpenParen,
             Token::LiteralInteger(1),
-            Token::Operator(Operator::CloseParen),
+            Token::CloseParen,
         ]);
 
         let expected = Expr::IntegerValue(1);
@@ -1484,11 +1694,11 @@ print(y)",
     fn parse_parens_expr() {
         //(1 + 2) * 3
         let result = parse(vec![
-            Token::Operator(Operator::OpenParen),
+            Token::OpenParen,
             Token::LiteralInteger(1),
             Token::Operator(Operator::Plus),
             Token::LiteralInteger(2),
-            Token::Operator(Operator::CloseParen),
+            Token::CloseParen,
             Token::Operator(Operator::Multiply),
             Token::LiteralInteger(3),
         ]);
@@ -1995,7 +2205,7 @@ print(y)",
         let tokens = tokenize("x = 1").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![ String::from("x")],
             expression: Expr::IntegerValue(1),
         }];
         assert_eq!(expected, result);
@@ -2018,7 +2228,7 @@ print(y)",
         let tokens = tokenize("x = x * 1").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![ String::from("x")],
             expression: Expr::BinaryOperation(
                 Box::new(Expr::Variable(String::from("x"))),
                 Operator::Multiply,
@@ -2066,7 +2276,7 @@ print(y)",
         let tokens = tokenize("x = not (True and False) or (False)").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![ String::from("x")],
             expression: Expr::BinaryOperation(
                 Box::new(Expr::UnaryExpression(
                     Operator::Not,
@@ -2089,7 +2299,7 @@ print(y)",
         let tokens = tokenize("x = 'abc'").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![String::from("x")],
             expression: Expr::StringValue(String::from("abc")),
         }];
 
@@ -2101,7 +2311,7 @@ print(y)",
         let tokens = tokenize("x = 'abc' + 'cde'").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![String::from("x")],
             expression: Expr::BinaryOperation(
                 Box::new(Expr::StringValue(String::from("abc"))),
                 Operator::Plus,
@@ -2158,7 +2368,7 @@ print(y)",
         let result = parse_ast(tokens);
         let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
         let expected = vec![AST::Assign {
-            variable_name: String::from("x"),
+            path: vec![String::from("x")],
             expression: expr,
         }];
         assert_eq!(expected, result);
@@ -2167,11 +2377,138 @@ print(y)",
     #[test]
     fn member_acessor() {
         let tokens = tokenize("obj.prop").unwrap();
+        println!("{:?}", tokens);
         let result = parse_ast(tokens);
         let expected = vec![AST::StandaloneExpr(Expr::MemberAccess(
             Box::new(Expr::Variable("obj".into())),
             "prop".into(),
         ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn for_item_in_list_print() {
+        let tokens = tokenize(
+            "
+for item in list:
+    print(item)
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::ForStatement {
+            item_name: "item".into(),
+            list_expression: Expr::Variable("list".into()),
+            body: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                "print".into(),
+                vec![Expr::Variable("item".into())],
+            ))],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_decl() {
+        let tokens = tokenize(
+            "
+def function(x):
+    print(x)
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec!["x".into()],
+            body: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                "print".into(),
+                vec![Expr::Variable("x".into())],
+            ))],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_decl_noparams() {
+        let tokens = tokenize(
+            "
+def function():
+    print(x)
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec![],
+            body: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                "print".into(),
+                vec![Expr::Variable("x".into())],
+            ))],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_decl_manyparams() {
+        let tokens = tokenize(
+            "
+def function(x,y,z):
+    print(x)
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec!["x".into(), "y".into(), "z".into()],
+            body: vec![AST::StandaloneExpr(Expr::FunctionCall(
+                "print".into(),
+                vec![Expr::Variable("x".into())],
+            ))],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn return_nothing() {
+        let tokens = tokenize(
+            "
+def function(x):
+    return
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec!["x".into()],
+            body: vec![AST::Return(None)],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn return_expr() {
+        let tokens = tokenize(
+            "
+def function(x):
+    return x + 1
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec!["x".into()],
+            body: vec![AST::Return(Some(
+                Expr::BinaryOperation(
+                    Box::new(Expr::Variable("x".into())),
+                    Operator::Plus,
+                    Box::new(Expr::IntegerValue(1))
+                )
+            ))],
+        }];
         assert_eq!(expected, result);
     }
 }

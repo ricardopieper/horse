@@ -1,6 +1,9 @@
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
 
-fn concat(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+
+fn concat(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj_mut(params.bound_pyobj.unwrap())
@@ -28,7 +31,7 @@ fn concat(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn extend(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn extend(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let other_data = runtime.get_raw_data_of_pyobj(params.params[0]);
     match other_data {
@@ -50,7 +53,7 @@ fn extend(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn append(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn append(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj_mut(params.bound_pyobj.unwrap())
@@ -59,7 +62,7 @@ fn append(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     return params.bound_pyobj.unwrap();
 }
 
-fn equals(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let this_list = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -103,7 +106,7 @@ fn equals(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn not_equals(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn not_equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let result = runtime.call_method(params.bound_pyobj.unwrap(), "__eq__", &[params.params[0]]);
     match result {
@@ -120,7 +123,7 @@ fn not_equals(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let this_list = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -149,7 +152,7 @@ fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let this_list = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -159,11 +162,9 @@ fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     let all_reprs: Vec<String> = this_list
         .iter()
         .map(|ptr_self| {
-            let as_string = runtime.call_method(*ptr_self, "__str__", &[]).unwrap();
+            let as_string = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
             return runtime
-                .get_pyobj_byaddr(as_string)
-                .try_get_builtin()
-                .unwrap()
+                .get_raw_data_of_pyobj(as_string)
                 .take_string()
                 .clone();
         })
@@ -178,7 +179,7 @@ fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn len(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn len(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let this_list = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -190,6 +191,25 @@ fn len(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
+fn getitem(runtime: &Runtime, params: CallParams) -> MemoryAddress {
+    check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
+    let this_list = runtime
+        .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
+        .take_list();
+    
+    let index = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
+
+    if index as usize >= this_list.len() {
+        let exception = runtime.allocate_type_byaddr_raw(runtime.builtin_type_addrs.index_err, BuiltInTypeData::String("list index out of range".into()));
+        runtime.raise_exception(exception);
+        return exception;
+    } else {
+        let value_at_index = this_list[index as usize];
+        return value_at_index
+    }
+
+}
+
 pub fn register_list_type(runtime: &mut Runtime) -> MemoryAddress {
     let list_type = runtime.create_type(BUILTIN_MODULE, "list", None);
 
@@ -199,6 +219,8 @@ pub fn register_list_type(runtime: &mut Runtime) -> MemoryAddress {
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__repr__", repr);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__str__", to_str);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__len__", len);
+    runtime.register_bounded_func(BUILTIN_MODULE, "list", "__getitem__", getitem);
+    runtime.register_bounded_func(BUILTIN_MODULE, "list", "__iter__", len);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "append", append);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "extend", extend);
     runtime.builtin_type_addrs.list = list_type;

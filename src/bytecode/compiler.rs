@@ -7,7 +7,6 @@ use std::collections::HashMap;
 fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
    let loadconst_idx = if !const_map.contains_key(&constval) {
         let len = const_map.len();
-        //println!("Storing const {:?} with key {:?}", constval, len);
         const_map.insert(constval, len);
         len
     } else {
@@ -89,7 +88,7 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
                         Operator::LessEquals => Instruction::CompareLessEquals,
                         Operator::NotEquals => Instruction::CompareNotEquals,
                         _ => {
-                            panic!("Shouldn't happen")
+                            panic!("Operator not implemented: {:?}", op)
                         }
                     };
                     final_instructions.push(opcode);
@@ -122,7 +121,7 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             //setup order of params
 
             let mut final_instructions = vec![];
-            final_instructions.push(Instruction::LoadFunction(fname.to_string()));
+            final_instructions.push(Instruction::UnresolvedLoadName(fname.to_string()));
 
             let len_params = params.len();
             for param_expr in params {
@@ -154,35 +153,43 @@ struct ConstAndIndex {
     index: usize
 }
 
-
-pub fn compile(ast: Vec<AST>) -> Program {
-
-    let mut const_values_and_indices = HashMap::new();
-    let instructions = compile_ast(ast, 0, &mut const_values_and_indices);
-
+pub fn resolve_loads_stores(code: &mut CodeObject) {
     let mut names_indices = HashMap::new();
 
-    //@TODO make compiler phases, ex: compilation, resolve consts, resolve local stores 
+    for name in code.params.iter() {
+        names_indices.insert(name.clone(), names_indices.len());
+    }
+
+
     //Find all variable stores and set slots for each one of them
-    for instruction in instructions.iter() {
+    for instruction in code.instructions.iter() {
         if let Instruction::UnresolvedStoreName(name) = instruction {
             if !names_indices.contains_key(name) {
-                names_indices.insert(name, names_indices.len());
+                names_indices.insert(name.clone(), names_indices.len());
             }
         }
     }
 
     //Instead of storing values in string names (hashing strings is slooooooooooooooooow), store variables in
     //integer slots 
-    let new_instructions: Vec<Instruction> = instructions.iter().map(|instruction| {
+    let new_instructions: Vec<Instruction> = code.instructions.iter().map(|instruction| {
         return if let Instruction::UnresolvedLoadName(name) = instruction {
-            match names_indices.get(&name) {
+            match names_indices.get(name) {
                 Some(idx) => Instruction::LoadName(*idx),
-                None => Instruction::LoadGlobal(name.clone())
+                None => {
+                    let cur_size = names_indices.len();
+                    names_indices.insert(name.clone(), cur_size);
+
+                    if code.params.contains(&name) {
+                        Instruction::LoadName(cur_size)
+                    } else {
+                        Instruction::LoadGlobal(cur_size)
+                    }
+                }
             }
         }
         else if let Instruction::UnresolvedStoreName(name) = instruction {
-            let idx = names_indices.get(&name).unwrap();
+            let idx = names_indices.get(name).unwrap();
             Instruction::StoreName(*idx)
         }
         else {
@@ -190,42 +197,94 @@ pub fn compile(ast: Vec<AST>) -> Program {
         }
     }).collect();
 
-    //for inst in new_instructions.iter() {
-    //    println!("{:?}", inst)
-    //}
+    let mut indices_names = vec!["".into(); names_indices.len()];
 
-    let mut vec_const = vec![];
-    for (constval, index) in const_values_and_indices {
-        vec_const.push(ConstAndIndex {
-            constval,
-            index
-        })
+    for (k, v) in names_indices.iter() {
+        indices_names[*v] = k.clone();
     }
-    vec_const.sort_unstable_by(|a, b| a.index.cmp(&b.index));
+
+    code.instructions = new_instructions;
+    code.names = indices_names;
+}
+
+pub fn compile(ast: Vec<AST>) -> Program {
+
+    let mut all_results = vec![];
+    let mut compile_result = compile_ast(ast, 0, &mut all_results, &mut HashMap::new());
+    compile_result.main = true;
+    resolve_loads_stores(&mut compile_result);
+    
+    /*for inst in compile_result.instructions.iter() {
+        if let Instruction::LoadConst(x) = inst {
+            println!("instr {:?} {:?}", inst, compile_result.consts[*x]);
+        } else {
+            println!("{:?}", inst);
+        }
+    }*/
+
+    all_results.insert(0, compile_result);
 
     Program {
         version: 1,
-        data: vec_const.into_iter().map(|x| x.constval).collect(),
-        code: new_instructions
+        code_objects: all_results
     }
 }
 
-pub fn compile_ast(ast: Vec<AST>, offset: usize, 
-    const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
+
+pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
-    
+
     for ast_item in ast {
         match ast_item {
             AST::Assign {
-                variable_name,
+                path,
                 expression,
             } => {
                 all_instructions.append(&mut compile_expr(expression, const_map));
-                all_instructions.push(Instruction::UnresolvedStoreName(variable_name));
+                all_instructions.push(Instruction::UnresolvedStoreName(path[0].clone()));
             }
             AST::StandaloneExpr(expr) => {
                 all_instructions.append(&mut compile_expr(expr, const_map));
+            },
+            AST::Return(Some(expr)) => {
+                all_instructions.append(&mut compile_expr(expr, const_map));
+                all_instructions.push(Instruction::ReturnValue);
             }
+            AST::Return(None) => {
+                all_instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+                all_instructions.push(Instruction::ReturnValue);
+            }
+            AST::DeclareFunction{function_name, parameters, body} => {
+                let mut new_const_map = HashMap::new();
+                let mut func_instructions = compile_ast(body, 0, results, &mut new_const_map);
+                func_instructions.main = false;
+                match func_instructions.instructions.last().unwrap() {
+                    Instruction::ReturnValue => { /*unchanged*/ },
+                    _ => {
+                        func_instructions.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+                        func_instructions.instructions.push(Instruction::ReturnValue);
+                    }
+                }
+                func_instructions.params = parameters.clone();
+                resolve_loads_stores(&mut func_instructions);
+                let constval_code = Const::UserFunction(func_instructions, function_name.clone());
+                let mut code_idx = process_constval(constval_code, const_map);
+
+                let constval_name = Const::String(function_name.clone());
+                let mut name_idx = process_constval(constval_name, const_map);
+                all_instructions.append(&mut code_idx);
+                all_instructions.append(&mut name_idx);
+                all_instructions.push(Instruction::MakeFunction);
+                all_instructions.push(Instruction::UnresolvedStoreName(function_name.clone()));
+                
+            }
+            AST::ForStatement{item_name:_, list_expression: _, body: _} => {
+            
+            
+                unimplemented!(); 
+            
+            
+            },
             AST::IfStatement {
                 true_branch,
                 elifs: _,
@@ -239,7 +298,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
                 let offset_before_if = offset + all_instructions.len() + 1;
 
                 let mut true_branch_compiled =
-                    compile_ast(true_branch.statements, offset_before_if, const_map);
+                    compile_ast(true_branch.statements, offset_before_if, results, const_map);
                 //generate a jump to the code right after the true branch
 
                 //if there is an else: statement, the true branch must jump to after the false branch
@@ -247,26 +306,26 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
                     //+1 because where will be a jump unconditional that is *part* of the true branch
 
                     let offset_after_true_branch =
-                        offset_before_if + true_branch_compiled.len() + 1;
+                        offset_before_if + true_branch_compiled.instructions.len() + 1;
                     all_instructions.push(Instruction::JumpIfFalseAndPopStack(
                         offset_after_true_branch,
                     ));
-                    all_instructions.append(&mut true_branch_compiled);
+                    all_instructions.append(&mut true_branch_compiled.instructions);
 
-                    let mut false_branch_compiled = compile_ast(else_ast, offset_after_true_branch, const_map);
+                    let mut false_branch_compiled = compile_ast(else_ast, offset_after_true_branch, results, const_map);
 
                     //+1 because there will be an instruction
                     //in the true branch that will jump to *after* the false branch
                     let offset_after_else =
-                        offset_after_true_branch + false_branch_compiled.len() + 1;
+                        offset_after_true_branch + false_branch_compiled.instructions.len() + 1;
                     all_instructions.push(Instruction::JumpUnconditional(offset_after_else));
-                    all_instructions.append(&mut false_branch_compiled);
+                    all_instructions.append(&mut false_branch_compiled.instructions);
                 } else {
-                    let offset_after_true_branch = offset_before_if + true_branch_compiled.len();
+                    let offset_after_true_branch = offset_before_if + true_branch_compiled.instructions.len();
                     all_instructions.push(Instruction::JumpIfFalseAndPopStack(
                         offset_after_true_branch,
                     ));
-                    all_instructions.append(&mut true_branch_compiled);
+                    all_instructions.append(&mut true_branch_compiled.instructions);
                 }
             }
             AST::WhileStatement { expression, body } => {
@@ -274,12 +333,12 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
                 let mut compiled_expr = compile_expr(expression, const_map);
                 //+1 for the jump if false
                 let offset_after_expr = all_instructions.len() + compiled_expr.len() + 1;
-                let compiled_body = compile_ast(body, offset_after_expr, const_map);
+                let compiled_body = compile_ast(body, offset_after_expr, results, const_map);
                 all_instructions.append(&mut compiled_expr);
-                let offset_after_body = offset_after_expr + compiled_body.len() + 1;
+                let offset_after_body = offset_after_expr + compiled_body.instructions.len() + 1;
                 all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_body));
 
-                let mut compiled_body_with_resolved_breaks: Vec<Instruction> = compiled_body
+                let mut compiled_body_with_resolved_breaks: Vec<Instruction> = compiled_body.instructions
                     .into_iter()
                     .map(|instr| -> Instruction {
                         if let Instruction::UnresolvedBreak = instr {
@@ -309,7 +368,22 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize,
         }
     }
 
-    return all_instructions;
+    let mut vec_const = vec![];
+    for (constval, index) in const_map {
+        vec_const.push(ConstAndIndex {
+            constval: constval.clone(),
+            index: *index
+        })
+    }
+    vec_const.sort_unstable_by(|a, b| a.index.cmp(&b.index));
+
+    return CodeObject {
+        instructions: all_instructions,
+        names: vec![],
+        params: vec![],
+        consts: vec_const.into_iter().map(|x| x.constval).collect(),
+        main: false
+    };
 }
 
 #[cfg(test)]
@@ -331,7 +405,7 @@ list_len = len(list)
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile( expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
         let list_len_value = runtime.get_local(1).unwrap();
         let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
@@ -352,7 +426,7 @@ list_len = len(list3)
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile( expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
         let list_len_value = runtime.get_local(3).unwrap();
         let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
@@ -371,7 +445,7 @@ result = len(list) + 1
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile( expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
         let list_len_value = runtime.get_local(1).unwrap();
         let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
@@ -393,7 +467,7 @@ while x < 1000:
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile( expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
         let x_value = runtime.get_local(0).unwrap();
         let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
@@ -417,7 +491,7 @@ while x < 1000:
         )
         .unwrap();
         let expr = parse_ast(tokens);
-        let program = compile( expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
         let x_value = runtime.get_local(0).unwrap();
         let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();

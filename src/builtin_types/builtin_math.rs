@@ -1,8 +1,11 @@
 use crate::float::Float;
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
+
 
 fn create_function_1arg<FFloat>(
-    runtime: &mut Runtime,
+    runtime: &Runtime,
     name: &str,
     op_float: FFloat,
 ) -> MemoryAddress

@@ -1,6 +1,8 @@
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
 
-fn create_print_fn(runtime: &mut Runtime) -> MemoryAddress {
+fn create_print_fn(runtime: &Runtime) -> MemoryAddress {
     let func = PyCallable {
         code: Box::new(move |runtime, params| -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
@@ -22,7 +24,27 @@ fn create_print_fn(runtime: &mut Runtime) -> MemoryAddress {
     return runtime.create_callable_pyobj(func, Some("print".to_string()));
 }
 
-fn create_len_fn(runtime: &mut Runtime) -> MemoryAddress {
+fn create_printstack_fn(runtime: &Runtime) -> MemoryAddress {
+    let func = PyCallable {
+        code: Box::new(move |runtime, params| -> MemoryAddress {
+            check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+            runtime.print_stack();
+            return runtime.special_values[&SpecialValue::NoneValue];
+        }),
+    };
+    return runtime.create_callable_pyobj(func, Some("printstack".to_string()));
+}
+fn create_traceback_fn(runtime: &Runtime) -> MemoryAddress {
+    let func = PyCallable {
+        code: Box::new(move |runtime, params| -> MemoryAddress {
+            check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+            runtime.print_traceback();
+            return runtime.special_values[&SpecialValue::NoneValue];
+        }),
+    };
+    return runtime.create_callable_pyobj(func, Some("traceback".to_string()));
+}
+fn create_len_fn(runtime: &Runtime) -> MemoryAddress {
     let func = PyCallable {
         code: Box::new(move |runtime, params| -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
@@ -37,7 +59,11 @@ fn create_len_fn(runtime: &mut Runtime) -> MemoryAddress {
 
 pub fn register_builtin_functions(runtime: &mut Runtime) {
     let print_fn = create_print_fn(runtime);
+    let printstack_fn = create_printstack_fn(runtime);
+    let traceback_fn = create_traceback_fn(runtime);
     let create_len_fn = create_len_fn(runtime);
     runtime.add_to_module(BUILTIN_MODULE, "print", print_fn);
+    runtime.add_to_module(BUILTIN_MODULE, "printstack", printstack_fn);
+    runtime.add_to_module(BUILTIN_MODULE, "traceback", traceback_fn);
     runtime.add_to_module(BUILTIN_MODULE, "len", create_len_fn);
 }

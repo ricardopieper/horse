@@ -7,6 +7,8 @@ pub mod float_type;
 pub mod int_type;
 pub mod list_type;
 pub mod string_type;
+pub mod index_error;
+pub mod code_object;
 
 pub fn register_builtins(runtime: &mut Runtime) {
     int_type::register_int_type(runtime);
@@ -16,4 +18,6 @@ pub fn register_builtins(runtime: &mut Runtime) {
     boolean_type::register_boolean_type(runtime);
     string_type::register_string_type(runtime);
     list_type::register_list_type(runtime);
+    index_error::register_indexerr_type(runtime);
+    code_object::register_codeobject_type(runtime);
 }

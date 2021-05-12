@@ -1,11 +1,14 @@
 use crate::float::Float;
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
+
 
 const AND_STR: &'static str = "__and__";
 const OR_STR: &'static str = "__or__";
 const XOR_STR: &'static str = "__xor__";
 
-fn and_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn and_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
 
     let self_data = runtime
@@ -53,7 +56,7 @@ fn and_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn or_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn or_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
 
     let self_data = runtime
@@ -101,7 +104,7 @@ fn or_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn xor_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn xor_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
 
     let self_data = runtime
@@ -149,7 +152,7 @@ fn xor_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn not_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn not_method(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -162,7 +165,7 @@ fn not_method(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
         .take_int();
@@ -175,7 +178,7 @@ fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -189,13 +192,13 @@ fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn to_boolean(_runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_boolean(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     //no-op
     return params.bound_pyobj.unwrap();
 }
 
-fn to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_int(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -207,7 +210,7 @@ fn to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_float(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -221,7 +224,7 @@ fn to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
 
 macro_rules! create_unary_function {
     ($name:tt, $param_a:tt, $func:expr) => {
-        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
             let self_data = runtime
                 .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())

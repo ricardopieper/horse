@@ -1,7 +1,10 @@
 use crate::float::Float;
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
 
-fn create_concat(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+
+fn create_concat(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -16,13 +19,14 @@ fn create_concat(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
         runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(new_str))
     } else {
         panic!(
-            "can only concatenate str (not \"{}\") to str",
-            other_type_name
+            "can only concatenate str (not \"{}\") to str, {:?}",
+            other_type_name,
+            unsafe {&*params.params[0]}
         );
     }
 }
 
-fn create_eq(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_eq(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap());
     let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
@@ -39,7 +43,7 @@ fn create_eq(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn create_neq(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_neq(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
     let self_data = runtime.get_raw_data_of_pyobj(params.bound_pyobj.unwrap());
     let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
@@ -57,7 +61,7 @@ fn create_neq(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     }
 }
 
-fn create_to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_to_int(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -66,7 +70,7 @@ fn create_to_int(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     runtime.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(as_int))
 }
 
-fn create_to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_to_float(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -75,12 +79,12 @@ fn create_to_float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     runtime.allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(as_float)))
 }
 
-fn create_to_str(_runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_to_str(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     return params.bound_pyobj.unwrap();
 }
 
-fn create_repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -92,7 +96,7 @@ fn create_repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn create_new(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn create_new(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     if params.params.len() == 0 {
         return runtime
             .allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("")));
@@ -110,7 +114,7 @@ fn create_new(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
 
 macro_rules! create_transform_function {
     ($name:tt, $param_a:tt, $func:expr) => {
-        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
             let self_data = runtime
                 .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -135,9 +139,10 @@ pub fn register_string_type(runtime: &mut Runtime) -> MemoryAddress {
     runtime.register_bounded_func(BUILTIN_MODULE, "str", "__float__", create_to_float);
     runtime.register_bounded_func(BUILTIN_MODULE, "str", "__repr__", create_repr);
     runtime.register_bounded_func(BUILTIN_MODULE, "str", "__str__", create_to_str);
-    runtime.register_bounded_func(BUILTIN_MODULE, "str", "__new__", create_new);
+    runtime.register_type_unbounded_func(BUILTIN_MODULE, "str", "__new__", create_new);
     runtime.register_bounded_func(BUILTIN_MODULE, "str", "lower", str_lower);
     runtime.register_bounded_func(BUILTIN_MODULE, "str", "upper", str_upper);
     runtime.builtin_type_addrs.string = string_type;
+
     return string_type;
 }

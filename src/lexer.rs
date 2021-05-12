@@ -15,8 +15,7 @@ pub enum Operator {
     And,
     Or,
     Xor,
-    OpenParen,
-    CloseParen,
+
     Greater,
     GreaterEquals,
     Less,
@@ -38,10 +37,17 @@ pub enum Token {
     Comma,
     Colon,
     IfKeyword,
+    ForKeyword,
+    RaiseKeyword,
+    ReturnKeyword,
+    InKeyword,
     WhileKeyword,
     BreakKeyword,
     ElifKeyword,
     ElseKeyword,
+    DefKeyword,
+    OpenParen,
+    CloseParen,
     OpenArrayBracket,
     CloseArrayBracket,
     MemberAccessor,
@@ -79,6 +85,11 @@ impl PartialToken {
                 "if" => Token::IfKeyword,
                 "elif" => Token::ElifKeyword,
                 "else" => Token::ElseKeyword,
+                "for" => Token::ForKeyword,
+                "def" => Token::DefKeyword,
+                "raise" => Token::RaiseKeyword,
+                "return" => Token::ReturnKeyword,
+                "in" => Token::InKeyword,
                 "while" => Token::WhileKeyword,
                 "break" => Token::BreakKeyword,
                 _ => Token::Identifier(s),
@@ -115,8 +126,8 @@ impl PartialToken {
                 "==" => Token::Operator(Operator::Equals),
                 "=" => Token::Assign,
                 "!=" => Token::Operator(Operator::NotEquals),
-                "(" => Token::Operator(Operator::OpenParen),
-                ")" => Token::Operator(Operator::CloseParen),
+                "(" => Token::OpenParen,
+                ")" => Token::CloseParen,
                 ">" => Token::Operator(Operator::Greater),
                 "<" => Token::Operator(Operator::Less),
                 ">=" => Token::Operator(Operator::GreaterEquals),
@@ -538,14 +549,14 @@ mod tests {
     #[test]
     fn tokenier_openparen() -> Result<(), String> {
         let result = tokenize("(")?;
-        assert_eq!(result, [Token::Operator(Operator::OpenParen)]);
+        assert_eq!(result, [Token::OpenParen]);
         Ok(())
     }
 
     #[test]
     fn tokenier_closeparen() -> Result<(), String> {
         let result = tokenize(")")?;
-        assert_eq!(result, [Token::Operator(Operator::CloseParen)]);
+        assert_eq!(result, [Token::CloseParen]);
         Ok(())
     }
 
@@ -555,8 +566,8 @@ mod tests {
         assert_eq!(
             result,
             [
-                Token::Operator(Operator::OpenParen),
-                Token::Operator(Operator::CloseParen)
+                Token::OpenParen,
+                Token::CloseParen
             ]
         );
         Ok(())
@@ -568,11 +579,11 @@ mod tests {
         assert_eq!(
             result,
             [
-                Token::Operator(Operator::OpenParen),
+                Token::OpenParen,
                 Token::LiteralInteger(1),
                 Token::Operator(Operator::Plus),
                 Token::LiteralInteger(2),
-                Token::Operator(Operator::CloseParen),
+                Token::CloseParen,
                 Token::Operator(Operator::Multiply),
                 Token::LiteralInteger(3)
             ]
@@ -594,9 +605,9 @@ mod tests {
             result,
             [
                 Token::Identifier(String::from("some_identifier")),
-                Token::Operator(Operator::OpenParen),
+                Token::OpenParen,
                 Token::LiteralInteger(1),
-                Token::Operator(Operator::CloseParen)
+                Token::CloseParen
             ]
         );
         Ok(())
@@ -717,6 +728,79 @@ mod tests {
                 Token::Identifier(String::from("obj")),
                 Token::MemberAccessor,
                 Token::Identifier(String::from("method")),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn for_list() -> Result<(), String> {
+        let result = tokenize("for item in ls:")?;
+        assert_eq!(
+            result,
+            [
+                Token::ForKeyword,
+                Token::Identifier("item".into()),
+                Token::InKeyword,
+                Token::Identifier("ls".into()),
+                Token::Colon,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn def_function() -> Result<(), String> {
+        let result = tokenize("def function(x):")?;
+        assert_eq!(
+            result,
+            [
+                Token::DefKeyword,
+                Token::Identifier("function".into()),
+                Token::OpenParen,
+                Token::Identifier("x".into()),
+                Token::CloseParen,
+                Token::Colon,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn return_keyword() -> Result<(), String> {
+        let result = tokenize("return")?;
+        assert_eq!(
+            result,
+            [
+                Token::ReturnKeyword
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn raise_exception_expr() -> Result<(), String> {
+        let result = tokenize("raise SomeError")?;
+        assert_eq!(
+            result,
+            [
+                Token::RaiseKeyword,
+                Token::Identifier("SomeError".into())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn array_access() -> Result<(), String> {
+        let result = tokenize("array[0]")?;
+        assert_eq!(
+            result,
+            [
+                Token::Identifier("array".into()),
+                Token::OpenArrayBracket,
+                Token::LiteralInteger(0),
+                Token::CloseArrayBracket
             ]
         );
         Ok(())

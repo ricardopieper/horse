@@ -1,16 +1,19 @@
 use crate::float::Float;
 use crate::runtime::*;
+use crate::memory::*;
+use crate::datamodel::*;
+
 
 macro_rules! create_compare_function {
     ($name:tt, $param_a:tt, $param_b:tt, $compare:expr) => {
-        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.as_ref().unwrap(), 1, params.params.len());
 
             let other_type_addr = runtime.get_pyobj_type_addr(params.params[0]);
             let self_data = runtime
                 .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
                 .take_int();
-            let type_addr = &mut runtime.builtin_type_addrs;
+            let type_addr = &runtime.builtin_type_addrs;
 
             if other_type_addr == type_addr.boolean || other_type_addr == type_addr.int {
                 let other_int = runtime.get_raw_data_of_pyobj(params.params[0]).take_int();
@@ -39,7 +42,7 @@ macro_rules! create_compare_function {
 
 macro_rules! create_binop_function {
     ($name:tt, $param_a:tt, $param_b:tt, $binop:expr) => {
-        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.as_ref().unwrap(), 1, params.params.len());
             let other_data = runtime.get_raw_data_of_pyobj(params.params[0]);
             let other_type_addr = runtime.get_pyobj_type_addr(params.params[0]);
@@ -71,7 +74,7 @@ macro_rules! create_binop_function {
 
 macro_rules! create_unary_function {
     ($name:tt, $param_a:tt, $func:expr) => {
-        fn $name(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+        fn $name(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
             let self_data = runtime
                 .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -97,7 +100,7 @@ create_binop_function!(modulus, a, b, a % b);
 create_binop_function!(sub, a, b, a - b);
 create_binop_function!(mul, a, b, a * b);
 
-fn truediv(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn truediv(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.as_ref().unwrap(), 1, params.params.len());
 
     let other_type_name = runtime.get_pyobj_type_name(params.params[0]);
@@ -127,13 +130,13 @@ fn truediv(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
 create_unary_function!(negation, a, a * -1);
 create_unary_function!(positive, a, a);
 
-fn int(_runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn int(_runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     //no-op
     return params.bound_pyobj.unwrap();
 }
 
-fn float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn float(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -144,7 +147,7 @@ fn float(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -155,7 +158,7 @@ fn to_str(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
@@ -166,7 +169,7 @@ fn repr(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-fn to_boolean(runtime: &mut Runtime, params: CallParams) -> MemoryAddress {
+fn to_boolean(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
