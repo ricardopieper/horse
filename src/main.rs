@@ -21,7 +21,11 @@ fn main() {
         let input =
             fs::read_to_string(args[1].clone()).expect(&format!("Could not read file {}", args[1]));
         let tokens = lexer::tokenize(input.as_str());
+        println!("Tokens: {:?}", tokens);
         let ast = parser::parse_ast(tokens.unwrap());
+
+        println!("AST: {:?}", ast);
+
         let program = bytecode::compiler::compile(ast);
         bytecode::interpreter::execute_program(&mut runtime, program);
        

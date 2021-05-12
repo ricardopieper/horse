@@ -42,7 +42,7 @@ impl BuiltInTypeData {
     pub fn take_int(&self) -> i128 {
         match self {
             BuiltInTypeData::Int(i) => *i,
-            _ => panic!("Tried to transform something into int unexpectedly"),
+            _ => panic!("Tried to transform into int unexpectedly: {:?}", self),
         }
     }
 

@@ -35,24 +35,20 @@ Architecture
 ------------
 
 This project implements the usual lexer -> parser -> interpreter architecture. However, it currently
-also implements a bytecode and bytecode interpreter instead of executing the AST directly.
+also implements a bytecode and bytecode interpreter instead of executing the AST directly (tree).
 
 A small compiler produces the slowpython bytecode in `bytecode/compiler.rs`. This could possibly be serialized and run. 
 The interpreter runtime in `runtime.rs` implements the data model, function calls, modules and such. This is not JIT-compiled to x86, 
 it is interpreted right away.
 
-I try to follow the python bytecode specification, but I do some stuff differently. For instance: I call the binary functions
-for add, subtract, multiply and divide directly like `__add__`, `__sub__`, etc instead of having opcodes for 
-these binary operations. It also implements everything as an object.
-
-- Numbers are `PyObject` of type `int` or `float`
-- Functions are `PyObject` of type `function`
-- Built-in methods in numbers are `PyObject` of type `function`, but they are bounded to a `PyObject` instance
+I try to follow the python bytecode specification, but I do some stuff differently depending on the current limitations of this interpreter.
+There are optimizations for common arithmetic operations (like + - * / %) which fall back to calling the `__add__`, `__mul__`, etc methods 
+if the types aren't compatible (ex: string + string calls the `__add__` method).
 
 Does it work?
 -------------
 
-There are 133 tests so far, they test almost everything and they all pass. 
+There are a bunch of tests so far, they test almost everything and they all pass. 
 
 Is it stable?
 -------------

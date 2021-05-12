@@ -125,11 +125,12 @@ impl Parser {
     }
 
     fn new_stack(&mut self) {
+        let cur_indent = self.parsing_state.last().unwrap().current_indent;
         self.parsing_state.push(ParsingState {
             index: self.parsing_state.last().unwrap().index,
             operator_stack: vec![],
             operand_stack: vec![],
-            current_indent: self.parsing_state.last().unwrap().current_indent,
+            current_indent: cur_indent,
         })
     }
 
@@ -160,8 +161,9 @@ impl Parser {
         return self.parsing_state.last_mut().unwrap().current_indent;
     }
 
-    fn set_cur(&mut self, index: usize) {
-        self.parsing_state.last_mut().unwrap().index = index;
+    fn set_cur(&mut self, parsing_state: &ParsingState) {
+        self.parsing_state.last_mut().unwrap().index = parsing_state.index;
+        self.parsing_state.last_mut().unwrap().current_indent = parsing_state.current_indent;
     }
 
     fn cur(&self) -> &Token {
@@ -520,11 +522,11 @@ impl Parser {
             self.new_stack();
 
             let last_identation = self.skip_whitespace_newline();
-
-            if last_identation == self.get_expected_indent() {
+            let expected_indent = self.get_expected_indent();
+            if last_identation == expected_indent {
                 let popped = self.pop_stack();
                 //correct indentation found: commit
-                self.set_cur(popped.index);
+                self.set_cur(&popped);
             } else {
                 self.pop_stack();
                 return Ok(results);
@@ -543,7 +545,7 @@ impl Parser {
                     parsed_successfully = true;
                     let popped = self.pop_stack();
                     //correct indentation found: commit
-                    self.set_cur(popped.index);
+                    self.set_cur(&popped);
                     assert!(
                         !self.is_not_end() || self.cur_is_newline(),
                         "Newline or EOF expected after assign"
@@ -562,7 +564,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after if block"
@@ -584,7 +586,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after if block"
@@ -606,7 +608,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after for block"
@@ -628,7 +630,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after for block"
@@ -651,7 +653,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after if block, got {:?}",
@@ -680,7 +682,7 @@ impl Parser {
                         parsed_successfully = true;
                         let popped = self.pop_stack();
                         //correct indentation found: commit
-                        self.set_cur(popped.index);
+                        self.set_cur(&popped);
                         assert!(
                             !self.is_not_end() || self.cur_is_newline(),
                             "Newline or EOF expected after if block, got {:?}",
@@ -700,7 +702,7 @@ impl Parser {
                 results.push(AST::StandaloneExpr(expr.resulting_expr));
                 let popped = self.pop_stack();
                 //correct indentation found: commit
-                self.set_cur(popped.index);
+                self.set_cur(&popped);
                 parsed_successfully = true;
                 assert!(
                     !self.is_not_end() || self.cur_is_newline(),
@@ -757,7 +759,7 @@ impl Parser {
 
                                 let popped = self.pop_stack();
                                 self.push_operand(parenthesized);
-                                self.set_cur(popped.index);
+                                self.set_cur(&popped);
 
                                 was_operand = true;
                             }
@@ -782,7 +784,7 @@ impl Parser {
                                     let popped = self.pop_stack();
                                     let resulting_exprs = expressions.resulting_expr_list;
                                     self.push_operand(Expr::Array(resulting_exprs));
-                                    self.set_cur(popped.index);
+                                    self.set_cur(&popped);
                                 }
                                 Err(e) => {
                                     eprintln!("Failed parsing exprssion: {:?}", e);
@@ -838,7 +840,7 @@ impl Parser {
                                                 resulting_exprs,
                                             ));
 
-                                            self.set_cur(popped.index);
+                                            self.set_cur(&popped);
                                         }
                                         Err(e) => {
                                             eprintln!("Failed parsing exprssion: {:?}", e);

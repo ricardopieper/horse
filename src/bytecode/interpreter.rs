@@ -697,7 +697,7 @@ fn register_codeobj_consts(runtime: &Runtime, codeobj: &CodeObject) -> CodeObjec
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    #[cfg(test)]
+    //#[cfg(test)]
     {
         println!("Globals:");
 

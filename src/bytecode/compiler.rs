@@ -261,6 +261,9 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 match func_instructions.instructions.last().unwrap() {
                     Instruction::ReturnValue => { /*unchanged*/ },
                     _ => {
+                        if !const_map.contains_key(&Const::None) {
+                            const_map.insert(Const::None, const_map.len());
+                        }
                         func_instructions.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
                         func_instructions.instructions.push(Instruction::ReturnValue);
                     }
@@ -394,6 +397,25 @@ mod tests {
     use crate::runtime::Runtime;
 
     #[test]
+    fn run_pytests() -> std::io::Result<()> {
+
+        for entry in std::fs::read_dir("./pytests")? {
+            let dir = entry?;
+            println!("Loading source {:?}", dir.path());
+            let source = std::fs::read_to_string(dir.path());
+            let mut runtime = Runtime::new();
+            register_builtins(&mut runtime);
+            let tokens = tokenize(&source.unwrap())
+            .unwrap();
+            let expr = parse_ast(tokens);
+            let program = compile(expr);
+            interpreter::execute_program(&mut runtime, program);
+        }
+        
+        Ok(())
+    }
+
+    #[test]
     fn list_len() {
         let mut runtime = Runtime::new();
         register_builtins(&mut runtime);
@@ -416,12 +438,14 @@ list_len = len(list)
     fn list_concat_len() {
         let mut runtime = Runtime::new();
         register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
+        let tokens = tokenize("
 list1 = [1,2]
 list2 = [3,4]
 list3 = list1 + list2
 list_len = len(list3)
+
+if list_len != 4:
+    panic('failed!')
 ",
         )
         .unwrap();
@@ -779,7 +803,7 @@ else:
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
         assert_eq!(stack_value, 0);
     }
-
+    use crate::datamodel::*;
     #[test]
     fn load_method_with_loadattr_instruction() -> Result<(), String> {
         use crate::runtime::*;
