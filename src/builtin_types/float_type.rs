@@ -1,7 +1,7 @@
-use crate::float::Float;
-use crate::runtime::*;
-use crate::memory::*;
-use crate::datamodel::*;
+use crate::commons::float::Float;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 
 macro_rules! create_compare_function {

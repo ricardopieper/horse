@@ -1,6 +1,6 @@
-use crate::runtime::*;
-use crate::memory::*;
-use crate::datamodel::*;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 
 fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {

@@ -1,6 +1,6 @@
 use crate::bytecode::program::*;
-use crate::lexer::*;
-use crate::parser::*;
+use crate::ast::lexer::*;
+use crate::ast::parser::*;
 
 use std::collections::HashMap;
 
@@ -52,27 +52,27 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
                         Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
                         _ => panic!("operator not implemented: {:?}", op),
                     };
-        
+
                     let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
                     let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
-        
+
                     let call = Instruction::CallMethod {
                         number_arguments: 1,
                     };
-        
+
                     let mut final_instructions = vec![];
                     final_instructions.append(&mut lhs_program);
                     final_instructions.append(&mut load_method);
                     final_instructions.append(&mut rhs_program);
                     final_instructions.push(call);
-        
+
                     return final_instructions;
                 },
                 _ => {
                     let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
                     let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
                     let mut final_instructions = vec![];
-                    
+
                     final_instructions.append(&mut lhs_program);
                     final_instructions.append(&mut rhs_program);
                     let opcode = match op {
@@ -92,7 +92,7 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
                         }
                     };
                     final_instructions.push(opcode);
-        
+
                     return final_instructions;
                 }
             }
@@ -233,7 +233,6 @@ pub fn compile(ast: Vec<AST>) -> Program {
 
 pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
-
     for ast_item in ast {
         match ast_item {
             AST::Assign {
@@ -261,20 +260,25 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 match func_instructions.instructions.last().unwrap() {
                     Instruction::ReturnValue => { /*unchanged*/ },
                     _ => {
-                        if !const_map.contains_key(&Const::None) {
-                            const_map.insert(Const::None, const_map.len());
+                        //@TODO redo this
+                        if !new_const_map.contains_key(&Const::None) {
+                            new_const_map.insert(Const::None, new_const_map.len());
+                            func_instructions.consts.push(Const::None);
                         }
-                        func_instructions.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+                        println!("{:#?}", new_const_map);
+                        func_instructions.instructions.push(Instruction::LoadConst(new_const_map[&Const::None]));
                         func_instructions.instructions.push(Instruction::ReturnValue);
                     }
                 }
+
                 func_instructions.params = parameters.clone();
                 resolve_loads_stores(&mut func_instructions);
+
                 let constval_code = Const::UserFunction(func_instructions, function_name.clone());
                 let mut code_idx = process_constval(constval_code, const_map);
-
                 let constval_name = Const::String(function_name.clone());
                 let mut name_idx = process_constval(constval_name, const_map);
+
                 all_instructions.append(&mut code_idx);
                 all_instructions.append(&mut name_idx);
                 all_instructions.push(Instruction::MakeFunction);
@@ -371,6 +375,12 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
         }
     }
 
+    make_code_object(all_instructions, const_map)
+}
+
+
+fn make_code_object(instrs: Vec<Instruction>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
+
     let mut vec_const = vec![];
     for (constval, index) in const_map {
         vec_const.push(ConstAndIndex {
@@ -381,7 +391,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
     vec_const.sort_unstable_by(|a, b| a.index.cmp(&b.index));
 
     return CodeObject {
-        instructions: all_instructions,
+        instructions: instrs,
         names: vec![],
         params: vec![],
         consts: vec_const.into_iter().map(|x| x.constval).collect(),
@@ -394,7 +404,7 @@ mod tests {
     use super::*;
     use crate::builtin_types::*;
     use crate::bytecode::interpreter;
-    use crate::runtime::Runtime;
+    use crate::runtime::runtime::Runtime;
 
     #[test]
     fn run_pytests() -> std::io::Result<()> {
@@ -413,188 +423,6 @@ mod tests {
         }
         
         Ok(())
-    }
-
-    #[test]
-    fn list_len() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-list = [1,2]
-list_len = len(list)
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program = compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let list_len_value = runtime.get_local(1).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
-        assert_eq!(raw_x, 2);
-    }
-
-    #[test]
-    fn list_concat_len() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize("
-list1 = [1,2]
-list2 = [3,4]
-list3 = list1 + list2
-list_len = len(list3)
-
-if list_len != 4:
-    panic('failed!')
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program = compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let list_len_value = runtime.get_local(3).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
-        assert_eq!(raw_x, 4);
-    }
-
-    #[test]
-    fn list_len_inline_math() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-list = [1, 2]
-result = len(list) + 1
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program = compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let list_len_value = runtime.get_local(1).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(list_len_value).take_int();
-        assert_eq!(raw_x, 3);
-    }
-
-
-
-    #[test]
-    fn while_statements() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-x = 0
-while x < 1000:
-    x = x + 1
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program = compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let x_value = runtime.get_local(0).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
-        assert_eq!(raw_x, 1000);
-    }
-
-    #[test]
-    fn while_statements2() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-x = 0
-y = 0
-z = 0
-while x < 1000:
-    x = x + 1
-    y = y + 1
-    z = z + 1
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program = compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let x_value = runtime.get_local(0).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
-        assert_eq!(raw_x, 1000);
-    }
-
-    #[test]
-    fn while_statements_with_conditional_break() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-x = 0
-y = 0
-while x < 10000:
-    y = y + 1
-    x = x + 1
-    if x == 5000:
-        break
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program =  compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let x_value = runtime.get_local(0).unwrap();
-        let y_value = runtime.get_local(1).unwrap();
-        let raw_x = runtime.get_raw_data_of_pyobj(x_value).take_int();
-        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
-        assert_eq!(raw_y, 5000);
-        assert_eq!(raw_x, 5000);
-    }
-
-    #[test]
-    fn benchmark_program() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-x = 0
-y = 0
-mod5 = 0
-while x < 1000:
-    y = y + 1
-    x = x + 1
-    if x % 5 == 0:
-        mod5 = mod5 + 1
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program =  compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let mod5_value = runtime.get_local(2).unwrap();
-        let raw_mod5 = runtime.get_raw_data_of_pyobj(mod5_value).take_int();
-        assert_eq!(raw_mod5, 200);
-    }
-
-    #[test]
-    fn if_else_statements() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
-        let tokens = tokenize(
-            "
-x = 999
-y = 1
-if x == 0:
-    y = 2
-else:
-    y = 3
-",
-        )
-        .unwrap();
-        let expr = parse_ast(tokens);
-        let program =  compile(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let y_value = runtime.get_local(1).unwrap();
-        let raw_y = runtime.get_raw_data_of_pyobj(y_value).take_int();
-        assert_eq!(raw_y, 3);
     }
 
     #[test]
@@ -803,10 +631,10 @@ else:
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
         assert_eq!(stack_value, 0);
     }
-    use crate::datamodel::*;
+    use crate::runtime::datamodel::*;
     #[test]
     fn load_method_with_loadattr_instruction() -> Result<(), String> {
-        use crate::runtime::*;
+        use crate::runtime::runtime::Runtime;
         let mut runtime = Runtime::new();
         register_builtins(&mut runtime);
         let tokens = tokenize("\"abc\".lower").unwrap();
@@ -833,7 +661,6 @@ else:
 
     #[test]
     fn load_module_property_with_loadattr_instruction() -> Result<(), String> {
-        use crate::runtime::*;
         let mut runtime = Runtime::new();
         register_builtins(&mut runtime);
         let tokens = tokenize("__builtins__.float").unwrap();

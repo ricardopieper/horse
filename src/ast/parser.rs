@@ -1,5 +1,5 @@
-use crate::float::*;
-use crate::lexer::*;
+use crate::commons::float::*;
+use crate::ast::lexer::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
@@ -13,6 +13,7 @@ pub enum Expr {
     Parenthesized(Box<Expr>),
     UnaryExpression(Operator, Box<Expr>),
     MemberAccess(Box<Expr>, String),
+   // MethodCall(Box<Expr>, String, Vec<Expr>),
     Array(Vec<Expr>),
 }
 
@@ -2513,4 +2514,41 @@ def function(x):
         }];
         assert_eq!(expected, result);
     }
+
+    /*
+    #[test]
+    fn method_call_empty() {
+        let tokens = tokenize("method.call()").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::MemberAccess(
+            Box::new(Expr::Variable("method".into())),
+            "prop".into(),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn method_call_oneparam() {
+        let tokens = tokenize("method.call(1)").unwrap();
+        let result = parse_ast(tokens);
+        let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
+        let expected = vec![AST::Assign {
+            path: vec![String::from("x")],
+            expression: expr,
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn method_call_manyparam() {
+        let tokens = tokenize("method.call(1, 2)").unwrap();
+        let result = parse_ast(tokens);
+        let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
+        let expected = vec![AST::Assign {
+            path: vec![String::from("x")],
+            expression: expr,
+        }];
+        assert_eq!(expected, result);
+    }
+    */
 }

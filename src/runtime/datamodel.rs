@@ -1,6 +1,6 @@
-use crate::float::Float;
-use crate::memory::*;
-use crate::runtime::*;
+use crate::commons::float::*;
+use crate::runtime::runtime::*;
+use crate::runtime::memory::*;
 use crate::bytecode::program::CodeObject;
 use std::fmt::Debug;
 use std::collections::HashMap;

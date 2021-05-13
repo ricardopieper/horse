@@ -1,19 +1,18 @@
-mod lexer;
-mod parser;
-mod memory;
-mod datamodel;
-#[macro_use]
-mod runtime;
+mod ast;
+mod commons;
 mod builtin_types;
 mod bytecode;
+#[macro_use]
+mod runtime;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use std::env;
 use std::fs;
-mod float;
+use crate::ast::lexer;
+use crate::ast::parser;
 
 fn main() {
-    let mut runtime = runtime::Runtime::new();
+    let mut runtime = runtime::runtime::Runtime::new();
     builtin_types::register_builtins(&mut runtime);
     let args: Vec<String> = env::args().collect();
 

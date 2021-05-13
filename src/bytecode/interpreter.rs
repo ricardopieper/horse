@@ -1,8 +1,8 @@
 use crate::bytecode::program::*;
-use crate::float::Float;
-use crate::runtime::*;
-use crate::memory::*;
-use crate::datamodel::*;
+use crate::commons::float::Float;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 use smallvec::{smallvec, SmallVec};
 
@@ -143,7 +143,10 @@ pub fn handle_load_method(runtime: &Runtime, method_name: &str) {
     let obj = runtime.get_method_addr_byname(type_addr, method_name);
 
     match obj {
-        None => panic!("type has no method {}", method_name),
+        None => {
+            let name = runtime.get_type_name(type_addr);
+            panic!("type {} has no method {}", name, method_name);
+        }
         Some(addr) => {
             runtime.push_onto_stack(addr);
         }
@@ -663,6 +666,8 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let top = runtime.top_stack();
             //increase counter because it is being used by the current function
             runtime.increase_refcount(top);
+            let instructions_len = code.code.instructions.len();
+            runtime.set_pc(instructions_len);
         }
         _ => {
             panic!("Unsupported instruction: {:?}", instruction);

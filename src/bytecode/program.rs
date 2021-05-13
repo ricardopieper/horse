@@ -1,4 +1,4 @@
-use crate::float::Float;
+use crate::commons::float::Float;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Const {

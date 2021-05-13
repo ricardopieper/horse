@@ -1,6 +1,6 @@
-use crate::runtime::*;
-use crate::memory::*;
-use crate::datamodel::*;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 fn create_print_fn(runtime: &Runtime) -> MemoryAddress {
     let func = PyCallable {

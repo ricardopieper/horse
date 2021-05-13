@@ -1,8 +1,8 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use crate::bytecode::program::*;
-use crate::memory::*;
-use crate::datamodel::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 /* this is done by somewhat following the python data model in https://docs.python.org/3/reference/datamodel.html */
 
@@ -260,6 +260,19 @@ impl Runtime {
             .insert(MAIN_MODULE.to_string(), main_module_obj);
 
         return interpreter;
+    }
+
+    pub fn clear_stacks(&mut self) {
+        {
+            let mut stack_borrow = self.stack.borrow_mut();
+            while stack_borrow.len() > 0 {
+                let popped = stack_borrow.pop().unwrap();
+                for stack_val in popped.stack.iter() {
+                    self.decrease_refcount(*stack_val);
+                } 
+            }
+        }
+        self.new_stack_frame("__main__".to_owned());
     }
 
     pub fn create_type(
@@ -556,13 +569,13 @@ impl Runtime {
             };
             let func_addr = self.create_callable_pyobj(pycallable, Some(name.to_string()));
             let module = self.find_in_module(module_name, type_name).unwrap();
-            let pyobj = self.get_pyobj_byaddr_mut(module);
+            let pyobj_type = self.get_pyobj_byaddr_mut(module);
             if let PyObjectStructure::Type {
                 name: _,
                 methods: _,
                 functions,
                 supertype: _,
-            } = &mut pyobj.structure
+            } = &mut pyobj_type.structure
             {
                 functions.insert(name.to_string(), func_addr);
             } else {
@@ -578,25 +591,36 @@ impl Runtime {
         callable: F,
     ) where
         F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static,
+    {   let type_addr = self.find_in_module(module_name, type_name).unwrap();
+        self.register_bounded_func_on_addr(type_addr, name, callable);
+    }
+
+    pub fn register_bounded_func_on_addr<F>(
+        &mut self,
+        type_addr: MemoryAddress,
+        name: &str,
+        callable: F,
+    ) where
+        F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static,
     {
         let pycallable = PyCallable {
             code: Box::new(callable),
         };
         let func_addr = self.create_callable_pyobj(pycallable, Some(name.to_string()));
-        let module = self.find_in_module(module_name, type_name).unwrap();
-        let pyobj = self.get_pyobj_byaddr_mut(module);
+        let pyobj_type = self.get_pyobj_byaddr_mut(type_addr);
         if let PyObjectStructure::Type {
             name: _,
             methods,
             functions: _,
             supertype: _,
-        } = &mut pyobj.structure
+        } = &mut pyobj_type.structure
         {
             methods.insert(name.to_string(), func_addr);
         } else {
-            panic!("Object is not a type: {}.{}", module_name, type_name);
+            panic!("Object is not a type: {:?}", pyobj_type);
         }
     }
+
 
     pub fn get_raw_data_of_pyobj(&self, addr: MemoryAddress) -> &BuiltInTypeData {
         let pyobj = self.get_pyobj_byaddr(addr);
@@ -608,8 +632,8 @@ impl Runtime {
             return &raw_data;
         } else {
             panic!(
-                "get_raw_data_of_pyobj cannot be called on {:?}",
-                pyobj.structure
+                "get_raw_data_of_pyobj cannot be called on {:?} {:p}",
+                pyobj.structure, addr
             )
         }
     }
@@ -838,23 +862,14 @@ impl Runtime {
     }
 }
 
-macro_rules! check_builtin_func_params {
-    ($name:expr, $expected:expr, $received:expr) => {
-        if $expected != $received {
-            panic!(
-                "{}() expected {} arguments, got {}",
-                $name, $expected, $received
-            );
-        }
-    };
-}
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtin_types::register_builtins;
 
-    use crate::float::Float;
+    use crate::commons::float::Float;
     #[test]
     fn simply_instantiate_int() {
         let mut interpreter = Runtime::new();

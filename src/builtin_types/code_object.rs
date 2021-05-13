@@ -1,6 +1,6 @@
-use crate::runtime::*;
-use crate::datamodel::*;
-use crate::memory::*;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 fn get_bytecode(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());

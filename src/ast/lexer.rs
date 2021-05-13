@@ -1,4 +1,4 @@
-use crate::float::Float;
+use crate::commons::float::Float;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Operator {

@@ -1,8 +1,7 @@
-use crate::float::Float;
-use crate::runtime::*;
-use crate::memory::*;
-use crate::datamodel::*;
-
+use crate::commons::float::Float;
+use crate::runtime::runtime::*;
+use crate::runtime::datamodel::*;
+use crate::runtime::memory::*;
 
 const AND_STR: &'static str = "__and__";
 const OR_STR: &'static str = "__or__";
