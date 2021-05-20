@@ -14,16 +14,17 @@ use crate::ast::parser;
 fn main() {
     let mut runtime = runtime::runtime::Runtime::new();
     builtin_types::register_builtins(&mut runtime);
+    builtin_types::loader::run_loader(&mut runtime);
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 2 {
         let input =
             fs::read_to_string(args[1].clone()).expect(&format!("Could not read file {}", args[1]));
         let tokens = lexer::tokenize(input.as_str());
-        println!("Tokens: {:?}", tokens);
+        //println!("Tokens: {:?}", tokens);
         let ast = parser::parse_ast(tokens.unwrap());
 
-        println!("AST: {:?}", ast);
+        //println!("AST: {:?}", ast);
 
         let program = bytecode::compiler::compile(ast);
         bytecode::interpreter::execute_program(&mut runtime, program);

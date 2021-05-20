@@ -15,7 +15,8 @@ pub enum BuiltInTypeData {
     Int(i128),
     Float(Float),
     String(String),
-    List(Vec<MemoryAddress>)
+    List(Vec<MemoryAddress>),
+    ClassInstance
 }
 
 impl ToString for BuiltInTypeData {
@@ -26,7 +27,8 @@ impl ToString for BuiltInTypeData {
             BuiltInTypeData::String(i) => "String \"".to_owned() + i + "\"",
             BuiltInTypeData::List(_i) => {
                 return "a list".into()
-            }
+            },
+            BuiltInTypeData::ClassInstance => "class instance".to_owned()
         }
     }
 }
@@ -77,6 +79,8 @@ pub struct ProgramContext {
     pub code_objects: Vec<CodeObjectContext>,
 }
 
+type Namespace = HashMap<String, MemoryAddress>;
+
 #[derive(Debug)]
 pub enum PyObjectStructure {
     None,
@@ -88,20 +92,24 @@ pub enum PyObjectStructure {
     NativeCallable {
         code: PyCallable,
         name: Option<String>,
+        is_bound: bool
     },
     UserDefinedFunction {
         name: String,
         code: CodeObjectContext
     },
+    BoundMethod {
+        function_address: MemoryAddress,
+        bound_address: MemoryAddress
+    },
     Type {
         name: String,
-        methods: HashMap<String, MemoryAddress>,
         functions: HashMap<String, MemoryAddress>,
         supertype: Option<MemoryAddress>,
     },
     Module {
         name: String,
-        objects: HashMap<String, MemoryAddress>,
+        global_namespace: Namespace,
     },
 }
 
@@ -116,10 +124,7 @@ pub struct PyObject {
 impl PyObject {
     pub fn try_get_builtin(&self) -> Option<&BuiltInTypeData> {
         match &self.structure {
-            PyObjectStructure::Object {
-                raw_data,
-                refcount: _,
-            } => {
+            PyObjectStructure::Object { raw_data, .. } => {
                 return Some(raw_data);
             }
             _ => {

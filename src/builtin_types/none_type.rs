@@ -16,8 +16,9 @@ fn to_boolean(runtime: &Runtime, params: CallParams) -> MemoryAddress {
 }
 
 fn equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
-    let self_pyobj = runtime.get_pyobj_byaddr(params.params[0]);
+    let call_params = params.as_method();
+    check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
+    let self_pyobj = runtime.get_pyobj_byaddr(call_params.params[0]);
 
     match self_pyobj.structure {
         PyObjectStructure::None => runtime.builtin_type_addrs.true_val,

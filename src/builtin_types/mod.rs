@@ -25,5 +25,4 @@ pub fn register_builtins(runtime: &mut Runtime) {
     index_error::register_indexerr_type(runtime);
     code_object::register_codeobject_type(runtime);
     none_type::register_none_type_methods(runtime);
-    loader::run_loader(runtime);
 }

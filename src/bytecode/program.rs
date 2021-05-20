@@ -6,20 +6,20 @@ pub enum Const {
     Float(Float),
     Boolean(bool),
     String(String),
-    UserFunction(CodeObject, String),
+    CodeObject(CodeObject, String),
     None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Instruction {
     LoadConst(usize),
-    LoadMethod(String),
     LoadAttr(String),
     MakeFunction,
+    MakeClass,
     StoreName(usize),
+    StoreAttr(usize),
     LoadName(usize),
     LoadGlobal(usize),
-    CallMethod { number_arguments: usize },
     CallFunction { number_arguments: usize },
     JumpIfFalseAndPopStack(usize),
     JumpUnconditional(usize),
@@ -37,6 +37,7 @@ pub enum Instruction {
     CompareNotEquals,
     BuildList { number_elements: usize },
     UnresolvedBreak,
+    UnresolvedStoreAttr(String),
     UnresolvedStoreName(String),
     UnresolvedLoadName(String),
 }

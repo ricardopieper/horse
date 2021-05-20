@@ -16,61 +16,65 @@ fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> V
     return vec![Instruction::LoadConst(loadconst_idx)];
 }
 
-fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
+fn compile_expr(expr: &Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
     match expr {
         //TODO change Expr to Const(Const::Integer) so that it 
         //becomes easier to do this const stuff
         Expr::IntegerValue(i) => {
-            let constval = Const::Integer(i);
+            let constval = Const::Integer(*i);
             return process_constval(constval, const_map);
         },
         Expr::FloatValue(f) => {
-            let constval = Const::Float(f);
+            let constval = Const::Float(*f);
             return process_constval(constval, const_map);
         },
         Expr::BooleanValue(b) => {
-            let constval = Const::Boolean(b);
+            let constval = Const::Boolean(*b);
             return process_constval(constval, const_map);
         },
         Expr::StringValue(s) => {
-            let constval = Const::String(s);
+            let constval = Const::String(s.clone());
             return process_constval(constval, const_map);
         },
+        Expr::None => {
+            let constval = Const::None;
+            return process_constval(constval, const_map);         
+        }
         Expr::MemberAccess(expr, name) => {
-            let mut lhs_program: Vec<Instruction> = compile_expr(*expr, const_map);
+            let mut lhs_program: Vec<Instruction> = compile_expr(expr, const_map);
             let mut final_instructions = vec![];
             final_instructions.append(&mut lhs_program);
-            final_instructions.push(Instruction::LoadAttr(name));
+            final_instructions.push(Instruction::LoadAttr(name.clone()));
             return final_instructions
         }
         Expr::BinaryOperation(lhs, op, rhs) => {
             match op {
                 Operator::And | Operator::Or |  Operator::Xor => {
-                    let mut load_method: Vec<Instruction> = match op {
-                        Operator::And => vec![Instruction::LoadMethod(String::from("__and__"))],
-                        Operator::Or => vec![Instruction::LoadMethod(String::from("__or__"))],
-                        Operator::Xor => vec![Instruction::LoadMethod(String::from("__xor__"))],
+                    let mut load_attr: Vec<Instruction> = match op {
+                        Operator::And => vec![Instruction::LoadAttr(String::from("__and__"))],
+                        Operator::Or => vec![Instruction::LoadAttr(String::from("__or__"))],
+                        Operator::Xor => vec![Instruction::LoadAttr(String::from("__xor__"))],
                         _ => panic!("operator not implemented: {:?}", op),
                     };
 
-                    let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
-                    let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
+                    let mut lhs_program: Vec<Instruction> = compile_expr(lhs, const_map);
+                    let mut rhs_program: Vec<Instruction> = compile_expr(rhs, const_map);
 
-                    let call = Instruction::CallMethod {
-                        number_arguments: 1,
+                    let call = Instruction::CallFunction {
+                        number_arguments: 1
                     };
 
                     let mut final_instructions = vec![];
                     final_instructions.append(&mut lhs_program);
-                    final_instructions.append(&mut load_method);
+                    final_instructions.append(&mut load_attr);
                     final_instructions.append(&mut rhs_program);
                     final_instructions.push(call);
 
                     return final_instructions;
                 },
                 _ => {
-                    let mut lhs_program: Vec<Instruction> = compile_expr(*lhs, const_map);
-                    let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
+                    let mut lhs_program: Vec<Instruction> = compile_expr(lhs, const_map);
+                    let mut rhs_program: Vec<Instruction> = compile_expr(rhs, const_map);
                     let mut final_instructions = vec![];
 
                     final_instructions.append(&mut lhs_program);
@@ -98,32 +102,33 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             }
         }
         Expr::UnaryExpression(op, rhs) => {
-            let mut load_method: Vec<Instruction> = match op {
-                Operator::Plus => vec![Instruction::LoadMethod(String::from("__pos__"))],
-                Operator::Not => vec![Instruction::LoadMethod(String::from("__not__"))],
-                Operator::Minus => vec![Instruction::LoadMethod(String::from("__neg__"))],
+            let mut load_attr: Vec<Instruction> = match op {
+                Operator::Plus => vec![Instruction::LoadAttr(String::from("__pos__"))],
+                Operator::Not => vec![Instruction::LoadAttr(String::from("__not__"))],
+                Operator::Minus => vec![Instruction::LoadAttr(String::from("__neg__"))],
                 _ => panic!("operator not implemented: {:?}", op),
             };
 
-            let mut rhs_program: Vec<Instruction> = compile_expr(*rhs, const_map);
-            let call = Instruction::CallMethod {
-                number_arguments: 0,
+            let mut rhs_program: Vec<Instruction> = compile_expr(rhs, const_map);
+            let call = Instruction::CallFunction {
+                number_arguments: 0
             };
 
             let mut final_instructions = vec![];
             final_instructions.append(&mut rhs_program);
-            final_instructions.append(&mut load_method);
+            final_instructions.append(&mut load_attr);
             final_instructions.push(call);
 
             return final_instructions;
         }
-        Expr::FunctionCall(fname, params) => {
+        Expr::FunctionCall(fcall_expr, params) => {
             //setup order of params
-
             let mut final_instructions = vec![];
-            final_instructions.push(Instruction::UnresolvedLoadName(fname.to_string()));
 
+            let method_to_call_instrs: Vec<Instruction> = compile_expr(fcall_expr, const_map);
+            final_instructions.extend(method_to_call_instrs);
             let len_params = params.len();
+        
             for param_expr in params {
                 final_instructions.append(&mut compile_expr(param_expr, const_map));
             }
@@ -143,8 +148,8 @@ fn compile_expr(expr: Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instru
             final_instructions.push(Instruction::BuildList { number_elements });
             return final_instructions;
         },
-        Expr::Variable(var_name) => vec![Instruction::UnresolvedLoadName(var_name)],
-        Expr::Parenthesized(_) => panic!("Parenthesized expr should not leak to compiler"),
+        Expr::Variable(var_name) => vec![Instruction::UnresolvedLoadName(var_name.clone())],
+        Expr::Parenthesized(_) => panic!("Parenthesized expr should not leak to compiler")
     }
 }
 
@@ -166,6 +171,11 @@ pub fn resolve_loads_stores(code: &mut CodeObject) {
         if let Instruction::UnresolvedStoreName(name) = instruction {
             if !names_indices.contains_key(name) {
                 names_indices.insert(name.clone(), names_indices.len());
+            }
+        }
+        if let Instruction::UnresolvedStoreAttr(attr) = instruction {
+            if !names_indices.contains_key(attr) {
+                names_indices.insert(attr.clone(), names_indices.len());
             }
         }
     }
@@ -191,6 +201,10 @@ pub fn resolve_loads_stores(code: &mut CodeObject) {
         else if let Instruction::UnresolvedStoreName(name) = instruction {
             let idx = names_indices.get(name).unwrap();
             Instruction::StoreName(*idx)
+        }
+        else if let Instruction::UnresolvedStoreAttr(name) = instruction {
+            let idx = names_indices.get(name).unwrap();
+            Instruction::StoreAttr(*idx)
         }
         else {
             instruction.clone()
@@ -231,6 +245,26 @@ pub fn compile(ast: Vec<AST>) -> Program {
 }
 
 
+fn generate_assign_path(remaining_parts: &[String], is_first: bool) -> Vec<Instruction> {
+    let mut instructions = vec![];
+    match remaining_parts {
+        [first, rest @ ..] => {
+            if rest.len() > 0 {
+                if is_first {
+                    instructions.push(Instruction::UnresolvedLoadName(first.clone()));
+                } else {
+                    instructions.push(Instruction::LoadAttr(first.clone()));
+                }
+                instructions.extend(generate_assign_path(rest, false));
+            } else {
+                instructions.push(Instruction::UnresolvedStoreAttr(first.clone()));
+            }
+        },
+        [] => {}
+    }
+    return instructions;
+}
+
 pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
     for ast_item in ast {
@@ -239,19 +273,52 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 path,
                 expression,
             } => {
-                all_instructions.append(&mut compile_expr(expression, const_map));
-                all_instructions.push(Instruction::UnresolvedStoreName(path[0].clone()));
+                all_instructions.append(&mut compile_expr(&expression, const_map));
+                if path.len() == 1 {
+                    all_instructions.push(Instruction::UnresolvedStoreName(path[0].clone()));
+                } else {
+                    let instructions_for_assign = generate_assign_path(path.as_slice(), true);
+                    all_instructions.extend(instructions_for_assign);
+                }
             }
             AST::StandaloneExpr(expr) => {
-                all_instructions.append(&mut compile_expr(expr, const_map));
+                all_instructions.append(&mut compile_expr(&expr, const_map));
             },
             AST::Return(Some(expr)) => {
-                all_instructions.append(&mut compile_expr(expr, const_map));
+                all_instructions.append(&mut compile_expr(&expr, const_map));
                 all_instructions.push(Instruction::ReturnValue);
             }
             AST::Return(None) => {
                 all_instructions.push(Instruction::LoadConst(const_map[&Const::None]));
                 all_instructions.push(Instruction::ReturnValue);
+            }
+            AST::ClassDeclaration{class_name, body} => {
+                let mut new_const_map = HashMap::new();
+                let mut class_decl_function = compile_ast(body, 0, results, &mut new_const_map);
+                class_decl_function.main = false;
+                match class_decl_function.instructions.last().unwrap() {
+                    Instruction::ReturnValue => { /*unchanged*/ },
+                    _ => {
+                        //@TODO redo this
+                        if !new_const_map.contains_key(&Const::None) {
+                            new_const_map.insert(Const::None, new_const_map.len());
+                            class_decl_function.consts.push(Const::None);
+                        }
+                        //println!("{:#?}", new_const_map);
+                        class_decl_function.instructions.push(Instruction::LoadConst(new_const_map[&Const::None]));
+                        class_decl_function.instructions.push(Instruction::ReturnValue);
+                    }
+                }
+                resolve_loads_stores(&mut class_decl_function);
+                let constval_code = Const::CodeObject(class_decl_function, class_name.clone());
+                let mut code_idx = process_constval(constval_code, const_map);
+                let constval_name = Const::String(class_name.clone());
+                let mut name_idx = process_constval(constval_name, const_map);
+
+                all_instructions.append(&mut code_idx);
+                all_instructions.append(&mut name_idx);
+                all_instructions.push(Instruction::MakeClass);
+                all_instructions.push(Instruction::UnresolvedStoreName(class_name.clone()));
             }
             AST::DeclareFunction{function_name, parameters, body} => {
                 let mut new_const_map = HashMap::new();
@@ -265,7 +332,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                             new_const_map.insert(Const::None, new_const_map.len());
                             func_instructions.consts.push(Const::None);
                         }
-                        println!("{:#?}", new_const_map);
+                        //println!("{:#?}", new_const_map);
                         func_instructions.instructions.push(Instruction::LoadConst(new_const_map[&Const::None]));
                         func_instructions.instructions.push(Instruction::ReturnValue);
                     }
@@ -274,7 +341,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 func_instructions.params = parameters.clone();
                 resolve_loads_stores(&mut func_instructions);
 
-                let constval_code = Const::UserFunction(func_instructions, function_name.clone());
+                let constval_code = Const::CodeObject(func_instructions, function_name.clone());
                 let mut code_idx = process_constval(constval_code, const_map);
                 let constval_name = Const::String(function_name.clone());
                 let mut name_idx = process_constval(constval_name, const_map);
@@ -297,7 +364,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 elifs: _,
                 final_else,
             } => {
-                let mut if_expr_compiled = compile_expr(true_branch.expression, const_map);
+                let mut if_expr_compiled = compile_expr(&true_branch.expression, const_map);
                 all_instructions.append(&mut if_expr_compiled);
 
                 //+1 is because there will be a instruction before
@@ -337,7 +404,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
             }
             AST::WhileStatement { expression, body } => {
                 let offset_before_while = all_instructions.len() + offset;
-                let mut compiled_expr = compile_expr(expression, const_map);
+                let mut compiled_expr = compile_expr(&expression, const_map);
                 //+1 for the jump if false
                 let offset_after_expr = all_instructions.len() + compiled_expr.len() + 1;
                 let compiled_body = compile_ast(body, offset_after_expr, results, const_map);
@@ -359,6 +426,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.append(&mut compiled_body_with_resolved_breaks);
                 all_instructions.push(Instruction::JumpUnconditional(offset_before_while));
             }
+           
             AST::Break => {
                 //In python there's something called a "block stack" and an opcode called POP_BLOCK
                 //that makes this much easier, as well as a BREAK_LOOP instruction that uses block information
@@ -371,7 +439,6 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 //Perhaps other features such as generators, for comprehensions, etc really need blocks? I doubt it.
                 all_instructions.push(Instruction::UnresolvedBreak);
             }
-            //_ => panic!("Instruction not covered: {:?}", ast_item)
         }
     }
 
@@ -415,6 +482,7 @@ mod tests {
             let source = std::fs::read_to_string(dir.path());
             let mut runtime = Runtime::new();
             register_builtins(&mut runtime);
+            loader::run_loader(&mut runtime);
             let tokens = tokenize(&source.unwrap())
             .unwrap();
             let expr = parse_ast(tokens);
@@ -645,12 +713,12 @@ mod tests {
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::NativeCallable {
-                code: _, name
+                code: _, name, is_bound
             } => {
-                if name.as_ref().unwrap() == "lower" {
+                if name.as_ref().unwrap() == "lower" && *is_bound {
                     Ok(())                   
                 } else {
-                    Err("Loaded an attribute with name != lower".into())
+                    Err("Loaded an attribute with name != lower or not bound".into())
                 }
             },
             _ => {
@@ -671,7 +739,7 @@ mod tests {
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::Type {
-                name, methods:_, functions:_, supertype: _
+                name, functions:_, supertype: _
             } => {
                 if name == "float" {
                     Ok(())                   
@@ -683,5 +751,21 @@ mod tests {
                 Err("Did not load attribute, which should be a native type called float (from module __builtins__)".into())
             }
         }
+    }
+
+
+    #[test]
+    fn runs_classdef() -> Result<(), String> {
+        let mut runtime = Runtime::new();
+        register_builtins(&mut runtime);
+        let tokens = tokenize("
+class SomeClass:
+    def __init__(self):        
+        self.x = 1
+").unwrap();
+        let expr = parse_ast(tokens);
+        let program =  compile(expr);
+        interpreter::execute_program(&mut runtime, program);
+        Ok(())
     }
 }

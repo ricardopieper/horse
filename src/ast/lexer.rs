@@ -36,6 +36,7 @@ pub enum Token {
     None,
     Comma,
     Colon,
+    ClassDef,
     IfKeyword,
     ForKeyword,
     RaiseKeyword,
@@ -92,6 +93,7 @@ impl PartialToken {
                 "in" => Token::InKeyword,
                 "while" => Token::WhileKeyword,
                 "break" => Token::BreakKeyword,
+                "class" => Token::ClassDef,
                 _ => Token::Identifier(s),
             },
             Self::Comma => Token::Comma,
@@ -801,6 +803,21 @@ mod tests {
                 Token::OpenArrayBracket,
                 Token::LiteralInteger(0),
                 Token::CloseArrayBracket
+            ]
+        );
+        Ok(())
+    }
+
+
+    #[test]
+    fn class_def() -> Result<(), String> {
+        let result = tokenize("class Test:")?;
+        assert_eq!(
+            result,
+            [
+                Token::ClassDef,
+                Token::Identifier("Test".into()),
+                Token::Colon
             ]
         );
         Ok(())

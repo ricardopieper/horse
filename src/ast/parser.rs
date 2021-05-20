@@ -1,5 +1,5 @@
-use crate::commons::float::*;
 use crate::ast::lexer::*;
+use crate::commons::float::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
@@ -7,13 +7,13 @@ pub enum Expr {
     FloatValue(Float),
     StringValue(String),
     BooleanValue(bool),
-    FunctionCall(String, Vec<Expr>),
+    None,
+    FunctionCall(Box<Expr>, Vec<Expr>),
     Variable(String),
     BinaryOperation(Box<Expr>, Operator, Box<Expr>),
     Parenthesized(Box<Expr>),
     UnaryExpression(Operator, Box<Expr>),
     MemberAccess(Box<Expr>, String),
-   // MethodCall(Box<Expr>, String, Vec<Expr>),
     Array(Vec<Expr>),
 }
 
@@ -44,13 +44,17 @@ pub enum AST {
         list_expression: Expr,
         body: Vec<AST>,
     },
+    ClassDeclaration {
+        class_name: String,
+        body: Vec<AST>,
+    },
     DeclareFunction {
         function_name: String,
         parameters: Vec<String>,
         body: Vec<AST>,
     },
     Break,
-    Return(Option<Expr>)
+    Return(Option<Expr>),
 }
 
 impl Expr {
@@ -171,6 +175,10 @@ impl Parser {
         self.cur_offset(0)
     }
 
+    fn prev_token(&self) -> Option<&Token> {
+        self.cur_offset_opt(-1)
+    }
+
     fn cur_opt(&self) -> Option<&Token> {
         self.cur_offset_opt(0)
     }
@@ -244,9 +252,8 @@ impl Parser {
             if self.is_last() {
                 return None;
             } else {
-               self.next()
+                self.next()
             }
-       
             if let Token::MemberAccessor = self.cur() {
                 self.next();
             }
@@ -345,6 +352,42 @@ impl Parser {
         }
     }
 
+    pub fn parse_classdef(&mut self) -> Option<AST> {
+        if let Token::ClassDef = self.cur().clone() {
+            self.next();
+            if !self.can_go() {
+                None
+            } else {
+                if let Token::Identifier(name) = self.cur().clone() {
+                    self.next();
+                    if let Token::Colon = self.cur() {
+                        self.next();
+                    } else {
+                        panic!("Expected colon after class decl identifier");
+                    }
+                    if let Token::NewLine = self.cur() {
+                        self.next();
+                    } else {
+                        panic!("Expected newline after colon");
+                    }
+                    self.increment_expected_indent();
+                    let ast = self.parse_ast().unwrap();
+                    let def_classdecl = AST::ClassDeclaration {
+                        class_name: name.clone(),
+                        body: ast,
+                    };
+                    self.decrement_expected_indent();
+
+                    return Some(def_classdecl);
+                } else {
+                    panic!("Unexpected token: expected identifier, got something else")
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn parse_while_statement(&mut self) -> Option<AST> {
         if let Token::WhileKeyword = self.cur().clone() {
             self.next();
@@ -432,12 +475,8 @@ impl Parser {
         }
     }
 
-    pub fn parse_def_statement(&mut self, top_level: bool) -> Option<AST> {
+    pub fn parse_def_statement(&mut self) -> Option<AST> {
         if let Token::DefKeyword = self.cur().clone() {
-            if top_level && self.get_expected_indent() > 0 {
-                panic!("Functions can only be declared at top level")
-            }
-
             self.next();
             if !self.can_go() {
                 None
@@ -526,7 +565,6 @@ impl Parser {
             let expected_indent = self.get_expected_indent();
             if last_identation == expected_indent {
                 let popped = self.pop_stack();
-                //correct indentation found: commit
                 self.set_cur(&popped);
             } else {
                 self.pop_stack();
@@ -538,6 +576,23 @@ impl Parser {
             }
 
             let mut parsed_successfully = false;
+
+            if !parsed_successfully {
+                self.new_stack();
+                if let Some(assign_ast) = self.parse_classdef() {
+                    results.push(assign_ast);
+                    parsed_successfully = true;
+                    let popped = self.pop_stack();
+                    //correct indentation found: commit
+                    self.set_cur(&popped);
+                    assert!(
+                        !self.is_not_end() || self.cur_is_newline(),
+                        "Newline or EOF expected after assign"
+                    );
+                } else {
+                    self.pop_stack();
+                }
+            }
 
             if !parsed_successfully {
                 self.new_stack();
@@ -624,7 +679,7 @@ impl Parser {
 
             if !parsed_successfully {
                 self.new_stack();
-                let expr = self.parse_def_statement(true);
+                let expr = self.parse_def_statement();
                 match expr {
                     Some(ast_for) => {
                         results.push(ast_for);
@@ -733,6 +788,49 @@ impl Parser {
 
         return Ok(results);
     }
+/**
+ * 
+ *          //if we parsed some expression and we find an open paren... this might be a function call.
+            //it's time to support generic funcion call syntax, not only on names.
+           
+ * 
+ */
+
+    fn function_call_helper(&mut self, expr_callable: &Expr) -> Result<Expr, ParsingError> {
+
+        if let Token::CloseParen = self.cur() {
+            return Ok(Expr::FunctionCall(
+                Box::new(expr_callable.clone()),
+                vec![],
+            ));
+        } else {
+            self.new_stack();
+            let list_of_exprs = self.parse_comma_sep_list_expr();
+
+            match list_of_exprs {
+                //try parse stuff
+                Ok(expressions) => {
+                    //commit the result
+                    let popped = self.pop_stack();
+                    let resulting_exprs = expressions.resulting_expr_list;
+
+                    let fcall = Expr::FunctionCall(
+                        Box::new(expr_callable.clone()),
+                        resulting_exprs,
+                    );
+
+                    self.set_cur(&popped);
+
+                    return Ok(fcall);
+                }
+                Err(e) => {
+                    eprintln!("Failed parsing exprssion: {:?}", e);
+                    return Err(e);
+                }
+            }
+        }
+
+    }
 
     pub fn parse_expr(&mut self) -> Result<ParseExpressionResult, ParsingError> {
         loop {
@@ -745,28 +843,93 @@ impl Parser {
             //and parse the sub-expression recursively
             {
                 let tok: Token = self.cur().clone();
+                let prev_token = self.prev_token().map(|x| x.clone());
                 match tok {
                     Token::OpenParen => {
-                        self.new_stack(); //new parsing stack/state
-                        self.next(); //move to the first token, out of the OpenParen
+                        //move to the first token, out of the OpenParen
+                        //when parsing an open paren, it can either be a parenthesized expression, or a function call.
+                        //A parenthesized expression can appear everywhere, and so does a function call.
+                        //However, if the previous token was an operator, then the open paren can only be valid if we are
+                        //parsing a parenthesized expression. 
+                        //A function call open paren can only appear in the following scenarios:
+                        // - An expression that hasn't been fully parsed yet like `an_identifier` but next token is `(`
+                        // - `"a literal token"` and then `(` is also a valid function call. It just doesn't work in runtime. Same goes for int and float literals
+                        // - `some_map['mapKey']` and then `(` is also valid, will load the function from map and call it
+                        // - `some_array[index]()` similarly
+                        // - `function_call()` and then `(` would work if the function returns another function
+                        let mut could_be_fcall = true;
 
-                        match self.parse_expr() {
-                            //try parse stuff
-                            Ok(expr_result) => {
-                                //worked
-                                //commit the result
-                                let resulting_expr = expr_result.resulting_expr;
-                                let parenthesized = Expr::Parenthesized(Box::new(resulting_expr));
+                        if let Some(Token::Operator(_)) = prev_token {
+                            could_be_fcall = false;
+                        }
+                        if let None = prev_token {
+                            could_be_fcall = false;
+                        }
+                        if self.operand_stack().len() == 0 {
+                            could_be_fcall = false
+                        }
+                    
+                        if could_be_fcall {
+                            //when we parse a funcion, we need to parse its arguments as well.
+                            //however, the list of arguments is a list of expressions, and those expressions might be
+                            //function calls as well.
+                            //like fcall(fcall(fcall(1, fcall(2)), fcall2(3, fcall())))....)
+                            //Unlike parenthesized expressions, in this case I cannot just fetch everything between
+                            //the parens because there are commas separating the arguments. I can't also fetch all
+                            //the tokens until I find a comma, because i would have a list of tokens containig
+                            //[fcall(fcall(fcall(1,] as my list of tokens to parse.
+                            //I will need to parse lists of expressions for other stuff as well, like array items and tuple items.
+                            //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
+                            //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
+                            //like it's part of an expression, then maybe we should just understand that the expression has been finished.
+                            
+                            //Let's ensure that we have no operators pending
+                            if !self.operand_stack().is_empty() {
+                                self.next();
+                                let current_expr = self.operand_stack_mut().pop().unwrap();
 
-                                let popped = self.pop_stack();
-                                self.push_operand(parenthesized);
-                                self.set_cur(&popped);
-
-                                was_operand = true;
+                                //If the top expression is a binary operation, then we need to do a little bit of surgery.
+                                //The left side stays the same, but the right side needs adjustments 
+                                //because the parenthesis invokes a call over the result of the whole right-side expr.
+                                match current_expr {
+                                    Expr::BinaryOperation(left, op, right) => {
+                                        let right_side_fcall = self.function_call_helper(&right)?;
+                                        self.push_operand(Expr::BinaryOperation(
+                                            left,
+                                            op,
+                                            Box::new(right_side_fcall)
+                                        ));
+                                    }
+                                    expr => {
+                                        let fcall = self.function_call_helper(&expr)?;
+                                        self.push_operand(fcall);
+                                    }
+                                }
+                            } else {
+                                //is just a normal expression, go back
                             }
-                            Err(e) => {
-                                eprintln!("Failed parsing exprssion: {:?}", e);
-                                return Err(e);
+                                
+                        } else {
+                            self.new_stack(); //new parsing stack/state
+                            self.next();
+                            match self.parse_expr() {
+                                //try parse stuff
+                                Ok(expr_result) => {
+                                    //worked
+                                    //commit the result
+                                    let resulting_expr = expr_result.resulting_expr;
+                                    let parenthesized = Expr::Parenthesized(Box::new(resulting_expr));
+    
+                                    let popped = self.pop_stack();
+                                    self.push_operand(parenthesized);
+                                    self.set_cur(&popped);
+    
+                                    was_operand = true;
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed parsing exprssion: {:?}", e);
+                                    return Err(e);
+                                }
                             }
                         }
                     }
@@ -795,66 +958,7 @@ impl Parser {
                         }
                     }
                     Token::Identifier(identifier_str) => {
-                        if self.is_last() {
-                            self.push_operand(Expr::Variable(identifier_str.to_string()));
-                        } else {
-                            //if we have an identifier now,
-                            //then peek the next token to see if is a open paren.
-                            //if it is a open paren, then we are parsing a function.
-                            //Otherwise, consider that this is simply a variable
-                            self.next();
-                            let cur_token = self.cur();
-
-                            if let Token::OpenParen = cur_token {
-                                //when we parse a funcion, we need to parse its arguments as well.
-                                //however, the list of arguments is a list of expressions, and those expressions might be
-                                //function calls as well.
-                                //like fcall(fcall(fcall(1, fcall(2)), fcall2(3, fcall())))....)
-                                //Unlike parenthesized expressions, in this case I cannot just fetch everything between
-                                //the parens because there are commas separating the arguments. I can't also fetch all
-                                //the tokens until I find a comma, because i would have a list of tokens containig
-                                //[fcall(fcall(fcall(1,] as my list of tokens to parse.
-                                //I will need to parse lists of expressions for other stuff as well, like array items and tuple items.
-                                //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
-                                //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
-                                //like it's part of an expression, then maybe we should just understand that the expression has been finished.
-                                self.next();
-
-                                if let Token::CloseParen = self.cur() {
-                                    self.push_operand(Expr::FunctionCall(
-                                        identifier_str.clone(),
-                                        vec![],
-                                    ));
-                                } else {
-                                    self.new_stack();
-                                    let list_of_exprs = self.parse_comma_sep_list_expr();
-
-                                    match list_of_exprs {
-                                        //try parse stuff
-                                        Ok(expressions) => {
-                                            //commit the result
-                                            let popped = self.pop_stack();
-                                            let resulting_exprs = expressions.resulting_expr_list;
-
-                                            self.push_operand(Expr::FunctionCall(
-                                                identifier_str.to_string(),
-                                                resulting_exprs,
-                                            ));
-
-                                            self.set_cur(&popped);
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed parsing exprssion: {:?}", e);
-                                            return Err(e);
-                                        }
-                                    }
-                                }
-                            } else {
-                                self.advance(-1); //is just a variable name, go back
-                                self.push_operand(Expr::Variable(identifier_str.to_string()));
-                            }
-                        }
-
+                        self.push_operand(Expr::Variable(identifier_str.to_string()));
                         was_operand = true;
                     }
                     Token::MemberAccessor => {
@@ -885,6 +989,10 @@ impl Parser {
                         self.push_operand(Expr::StringValue(f));
                         was_operand = true;
                     }
+                    Token::None => {
+                        self.push_operand(Expr::None);
+                        was_operand = true;
+                    }
                     Token::True => {
                         self.push_operand(Expr::BooleanValue(true));
                         was_operand = true;
@@ -907,6 +1015,8 @@ impl Parser {
             } else {
                 self.next();
             }
+
+            
 
             if was_operand {
                 //base case: there is only an operator and an operand, like "-1"
@@ -1077,7 +1187,8 @@ mod tests {
     #[test]
     fn multiline_code() {
         let tokens = tokenize(
-            "x = 'abc' + 'cde'
+            "
+x = 'abc' + 'cde'
 y = x + str(True)",
         )
         .unwrap();
@@ -1097,7 +1208,7 @@ y = x + str(True)",
                     Box::new(Expr::Variable(String::from("x"))),
                     Operator::Plus,
                     Box::new(Expr::FunctionCall(
-                        String::from("str"),
+                        Box::new(Expr::Variable(String::from("str"))),
                         vec![Expr::BooleanValue(true)],
                     )),
                 ),
@@ -1217,7 +1328,7 @@ print(x)
                                 Box::new(Expr::IntegerValue(1)),
                             ),
                             statements: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                                String::from("print"),
+                                Box::new(Expr::Variable(String::from("print"))),
                                 vec![Expr::IntegerValue(2)],
                             ))],
                         },
@@ -1227,7 +1338,7 @@ print(x)
                 ]),
             },
             AST::StandaloneExpr(Expr::FunctionCall(
-                String::from("print"),
+                Box::new(Expr::Variable(String::from("print"))),
                 vec![Expr::Variable(String::from("x"))],
             )),
         ];
@@ -1285,7 +1396,7 @@ print(x)
                                     Box::new(Expr::IntegerValue(1)),
                                 ),
                                 statements: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                                    String::from("print"),
+                                    Box::new(Expr::Variable(String::from("print"))),
                                     vec![Expr::IntegerValue(2)],
                                 ))],
                             },
@@ -1298,7 +1409,7 @@ print(x)
                 final_else: None,
             },
             AST::StandaloneExpr(Expr::FunctionCall(
-                String::from("print"),
+                Box::new(Expr::Variable(String::from("print"))),
                 vec![Expr::Variable(String::from("x"))],
             )),
         ];
@@ -1308,7 +1419,8 @@ print(x)
     #[test]
     fn if_statement() {
         let tokens = tokenize(
-            "if x == 0:
+            "
+if x == 0:
     x = x + 1",
         )
         .unwrap();
@@ -1365,7 +1477,7 @@ print(x)",
                 final_else: None,
             },
             AST::StandaloneExpr(Expr::FunctionCall(
-                String::from("print"),
+                Box::new(Expr::Variable(String::from("print"))),
                 vec![Expr::Variable(String::from("x"))],
             )),
         ];
@@ -1396,13 +1508,13 @@ print(y)",
                     Box::new(Expr::Variable(String::from("x"))),
                     Operator::Plus,
                     Box::new(Expr::FunctionCall(
-                        String::from("str"),
+                        Box::new(Expr::Variable(String::from("str"))),
                         vec![Expr::BooleanValue(true)],
                     )),
                 ),
             },
             AST::StandaloneExpr(Expr::FunctionCall(
-                String::from("print"),
+                Box::new(Expr::Variable(String::from("print"))),
                 vec![Expr::Variable(String::from("y"))],
             )),
         ];
@@ -1788,7 +1900,10 @@ print(y)",
     fn function_call_without_parameters() {
         let tokens = tokenize("some_identifier()").unwrap();
         let result = parse(tokens);
-        let expected = Expr::FunctionCall(String::from("some_identifier"), vec![]);
+        let expected = Expr::FunctionCall(
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            vec![],
+        );
 
         assert_eq!(expected, result);
     }
@@ -1797,8 +1912,10 @@ print(y)",
     fn function_call_with_one_param() {
         let tokens = tokenize("some_identifier(1)").unwrap();
         let result = parse(tokens);
-        let expected =
-            Expr::FunctionCall(String::from("some_identifier"), vec![Expr::IntegerValue(1)]);
+        let expected = Expr::FunctionCall(
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            vec![Expr::IntegerValue(1)],
+        );
 
         assert_eq!(expected, result);
     }
@@ -1808,7 +1925,7 @@ print(y)",
         let tokens = tokenize("some_identifier(1, 2, 3)").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::IntegerValue(1),
                 Expr::IntegerValue(2),
@@ -1824,7 +1941,7 @@ print(y)",
         let tokens = tokenize("some_identifier(1 * 2)").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![Expr::BinaryOperation(
                 1.into(),
                 Operator::Multiply,
@@ -1840,7 +1957,7 @@ print(y)",
         let tokens = tokenize("some_identifier(1 * 2, 3 + 5, 88)").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::BinaryOperation(1.into(), Operator::Multiply, 2.into()),
                 Expr::BinaryOperation(3.into(), Operator::Plus, 5.into()),
@@ -1855,8 +1972,11 @@ print(y)",
         let tokens = tokenize("some_identifier(nested())").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
-            vec![Expr::FunctionCall(String::from("nested"), vec![])],
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            vec![Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("nested"))),
+                vec![],
+            )],
         );
         assert_eq!(expected, result);
     }
@@ -1866,9 +1986,9 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1))").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![Expr::FunctionCall(
-                String::from("nested"),
+                Box::new(Expr::Variable(String::from("nested"))),
                 vec![Expr::IntegerValue(1)],
             )],
         );
@@ -1880,9 +2000,9 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1, 2))").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![Expr::FunctionCall(
-                String::from("nested"),
+                Box::new(Expr::Variable(String::from("nested"))),
                 vec![Expr::IntegerValue(1), Expr::IntegerValue(2)],
             )],
         );
@@ -1894,9 +2014,9 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1 * 2, 2 / 3.4))").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![Expr::FunctionCall(
-                String::from("nested"),
+                Box::new(Expr::Variable(String::from("nested"))),
                 vec![
                     Expr::BinaryOperation(1.into(), Operator::Multiply, 2.into()),
                     Expr::BinaryOperation(2.into(), Operator::Divide, (3.4).into()),
@@ -1911,9 +2031,12 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1), 1)").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
-                Expr::FunctionCall(String::from("nested"), vec![Expr::IntegerValue(1)]),
+                Expr::FunctionCall(
+                    Box::new(Expr::Variable(String::from("nested"))),
+                    vec![Expr::IntegerValue(1)],
+                ),
                 Expr::IntegerValue(1),
             ],
         );
@@ -1925,17 +2048,17 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1 * 2, 2 / 3.4), 3, nested2())").unwrap();
         let result = parse(tokens);
         let expected = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::FunctionCall(
-                    String::from("nested"),
+                    Box::new(Expr::Variable(String::from("nested"))),
                     vec![
                         Expr::BinaryOperation(1.into(), Operator::Multiply, 2.into()),
                         Expr::BinaryOperation(2.into(), Operator::Divide, (3.4).into()),
                     ],
                 ),
                 Expr::IntegerValue(3),
-                Expr::FunctionCall(String::from("nested2"), vec![]),
+                Expr::FunctionCall(Box::new(Expr::Variable(String::from("nested2"))), vec![]),
             ],
         );
         assert_eq!(expected, result);
@@ -1945,7 +2068,10 @@ print(y)",
     fn multiply_fcall() {
         let tokens = tokenize("some_identifier(1) * 5").unwrap();
         let result = parse(tokens);
-        let call = Expr::FunctionCall(String::from("some_identifier"), vec![Expr::IntegerValue(1)]);
+        let call = Expr::FunctionCall(
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            vec![Expr::IntegerValue(1)],
+        );
         let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
         assert_eq!(expected, result);
     }
@@ -1955,7 +2081,7 @@ print(y)",
         let tokens = tokenize("some_identifier(1, 2) * 5").unwrap();
         let result = parse(tokens);
         let call = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![Expr::IntegerValue(1), Expr::IntegerValue(2)],
         );
         let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
@@ -1967,8 +2093,11 @@ print(y)",
         let tokens = tokenize("some_identifier(nested()) * 5").unwrap();
         let result = parse(tokens);
         let call = Expr::FunctionCall(
-            String::from("some_identifier"),
-            vec![Expr::FunctionCall(String::from("nested"), vec![])],
+            Box::new(Expr::Variable(String::from("some_identifier"))),
+            vec![Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("nested"))),
+                vec![],
+            )],
         );
         let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
         assert_eq!(expected, result);
@@ -1979,10 +2108,10 @@ print(y)",
         let tokens = tokenize("some_identifier(1, nested()) * 5").unwrap();
         let result = parse(tokens);
         let call = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::IntegerValue(1),
-                Expr::FunctionCall(String::from("nested"), vec![]),
+                Expr::FunctionCall(Box::new(Expr::Variable(String::from("nested"))), vec![]),
             ],
         );
         let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
@@ -1994,17 +2123,17 @@ print(y)",
         let tokens = tokenize("some_identifier(nested(1 * 2, 2 / 3.4), 3, nested2()) * 5").unwrap();
         let result = parse(tokens);
         let call = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::FunctionCall(
-                    String::from("nested"),
+                    Box::new(Expr::Variable(String::from("nested"))),
                     vec![
                         Expr::BinaryOperation(1.into(), Operator::Multiply, 2.into()),
                         Expr::BinaryOperation(2.into(), Operator::Divide, (3.4).into()),
                     ],
                 ),
                 Expr::IntegerValue(3),
-                Expr::FunctionCall(String::from("nested2"), vec![]),
+                Expr::FunctionCall(Box::new(Expr::Variable(String::from("nested2"))), vec![]),
             ],
         );
         let expected = Expr::BinaryOperation(Box::new(call), Operator::Multiply, 5.into());
@@ -2016,17 +2145,17 @@ print(y)",
         let tokens = tokenize("5 * some_identifier(nested(1 * 2, 2 / 3.4), 3, nested2())").unwrap();
         let result = parse(tokens);
         let call = Expr::FunctionCall(
-            String::from("some_identifier"),
+            Box::new(Expr::Variable(String::from("some_identifier"))),
             vec![
                 Expr::FunctionCall(
-                    String::from("nested"),
+                    Box::new(Expr::Variable(String::from("nested"))),
                     vec![
                         Expr::BinaryOperation(1.into(), Operator::Multiply, 2.into()),
                         Expr::BinaryOperation(2.into(), Operator::Divide, (3.4).into()),
                     ],
                 ),
                 Expr::IntegerValue(3),
-                Expr::FunctionCall(String::from("nested2"), vec![]),
+                Expr::FunctionCall(Box::new(Expr::Variable(String::from("nested2"))), vec![]),
             ],
         );
         let expected = Expr::BinaryOperation(5.into(), Operator::Multiply, Box::new(call));
@@ -2037,7 +2166,58 @@ print(y)",
     fn function_call_with_a_bunch_of_useless_params() {
         let tokens = tokenize("func((((((1))))))").unwrap();
         let result = parse(tokens);
-        let expected = Expr::FunctionCall(String::from("func"), vec![Expr::IntegerValue(1)]);
+        let expected = Expr::FunctionCall(
+            Box::new(Expr::Variable(String::from("func"))),
+            vec![Expr::IntegerValue(1)],
+        );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_call_in_right_binop() {
+        let tokens = tokenize("2 * func(1)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+            (2).into(),
+            Operator::Multiply,
+            Box::new(Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("func"))),
+                vec![Expr::IntegerValue(1)]
+            )),
+        );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_call_in_left_binop() {
+        let tokens = tokenize("func(1) * 2").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+            Box::new(Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("func"))),
+                vec![Expr::IntegerValue(1)]
+            )),
+            Operator::Multiply,
+            (2).into()            
+        );
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_call_in_both_sides_binop() {
+        let tokens = tokenize("func(1) * func(2)").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::BinaryOperation(
+            Box::new(Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("func"))),
+                vec![Expr::IntegerValue(1)]
+            )),
+            Operator::Multiply,
+            Box::new(Expr::FunctionCall(
+                Box::new(Expr::Variable(String::from("func"))),
+                vec![Expr::IntegerValue(2)]
+            ))            
+        );
         assert_eq!(expected, result);
     }
 
@@ -2135,7 +2315,7 @@ print(y)",
             (2).into(),
             Operator::Multiply,
             Box::new(Expr::FunctionCall(
-                String::from("func"),
+                Box::new(Expr::Variable(String::from("func"))),
                 vec![Expr::UnaryExpression(
                     Operator::Minus,
                     Box::new(Expr::UnaryExpression(
@@ -2208,7 +2388,7 @@ print(y)",
         let tokens = tokenize("x = 1").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            path: vec![ String::from("x")],
+            path: vec![String::from("x")],
             expression: Expr::IntegerValue(1),
         }];
         assert_eq!(expected, result);
@@ -2231,7 +2411,7 @@ print(y)",
         let tokens = tokenize("x = x * 1").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            path: vec![ String::from("x")],
+            path: vec![String::from("x")],
             expression: Expr::BinaryOperation(
                 Box::new(Expr::Variable(String::from("x"))),
                 Operator::Multiply,
@@ -2259,6 +2439,15 @@ print(y)",
     }
 
     #[test]
+    fn none() {
+        let tokens = tokenize("None").unwrap();
+        let result = parse(tokens);
+        let expected = Expr::None;
+
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn not_true_and_false() {
         let tokens = tokenize("not (True and False)").unwrap();
         let result = parse(tokens);
@@ -2279,7 +2468,7 @@ print(y)",
         let tokens = tokenize("x = not (True and False) or (False)").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::Assign {
-            path: vec![ String::from("x")],
+            path: vec![String::from("x")],
             expression: Expr::BinaryOperation(
                 Box::new(Expr::UnaryExpression(
                     Operator::Not,
@@ -2390,6 +2579,19 @@ print(y)",
     }
 
     #[test]
+    fn assign_member() {
+        let tokens = tokenize("obj.prop = 1").unwrap();
+        println!("{:?}", tokens);
+        let result = parse_ast(tokens);
+        let expected = vec![
+            AST::Assign {
+                path: vec!["obj".into(), "prop".into()],
+                expression: Expr::IntegerValue(1)
+            }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn for_item_in_list_print() {
         let tokens = tokenize(
             "
@@ -2403,7 +2605,7 @@ for item in list:
             item_name: "item".into(),
             list_expression: Expr::Variable("list".into()),
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                "print".into(),
+                Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("item".into())],
             ))],
         }];
@@ -2424,7 +2626,7 @@ def function(x):
             function_name: "function".into(),
             parameters: vec!["x".into()],
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                "print".into(),
+                Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("x".into())],
             ))],
         }];
@@ -2445,7 +2647,7 @@ def function():
             function_name: "function".into(),
             parameters: vec![],
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                "print".into(),
+                Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("x".into())],
             ))],
         }];
@@ -2466,7 +2668,7 @@ def function(x,y,z):
             function_name: "function".into(),
             parameters: vec!["x".into(), "y".into(), "z".into()],
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
-                "print".into(),
+                Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("x".into())],
             ))],
         }];
@@ -2504,38 +2706,100 @@ def function(x):
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
             parameters: vec!["x".into()],
-            body: vec![AST::Return(Some(
-                Expr::BinaryOperation(
-                    Box::new(Expr::Variable("x".into())),
-                    Operator::Plus,
-                    Box::new(Expr::IntegerValue(1))
-                )
-            ))],
+            body: vec![AST::Return(Some(Expr::BinaryOperation(
+                Box::new(Expr::Variable("x".into())),
+                Operator::Plus,
+                Box::new(Expr::IntegerValue(1)),
+            )))],
         }];
         assert_eq!(expected, result);
     }
 
-    /*
+    #[test]
+    fn class_definition() {
+        let tokens = tokenize(
+            "
+class SomeClass:
+    y = 99
+
+    def __init__(self):
+        self.x = 1
+
+    def test(self):
+        return self.x + 1
+
+    def static():
+        return 'static func'
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::ClassDeclaration {
+            class_name: "SomeClass".into(),
+            body: vec![
+                AST::Assign {
+                    path: vec!["y".into()],
+                    expression: Expr::IntegerValue(99),
+                },
+                AST::DeclareFunction {
+                    function_name: "__init__".into(),
+                    parameters: vec!["self".into()],
+                    body: vec![AST::Assign {
+                        path: vec!["self".into(), "x".into()],
+                        expression: Expr::IntegerValue(1),
+                    }],
+                },
+                AST::DeclareFunction {
+                    function_name: "test".into(),
+                    parameters: vec!["self".into()],
+                    body: vec![AST::Return(Some(Expr::BinaryOperation(
+                        Box::new(Expr::MemberAccess(
+                            Box::new(Expr::Variable("self".into())),
+                            "x".into(),
+                        )),
+                        Operator::Plus,
+                        Box::new(Expr::IntegerValue(1)),
+                    )))],
+                },
+                AST::DeclareFunction {
+                    function_name: "static".into(),
+                    parameters: vec![],
+                    body: vec![AST::Return(Some(Expr::StringValue(
+                        "static func".to_owned(),
+                    )))],
+                },
+            ],
+        }];
+        assert_eq!(expected, result);
+    }
+
     #[test]
     fn method_call_empty() {
         let tokens = tokenize("method.call()").unwrap();
         let result = parse_ast(tokens);
-        let expected = vec![AST::StandaloneExpr(Expr::MemberAccess(
-            Box::new(Expr::Variable("method".into())),
-            "prop".into(),
-        ))];
+        let expected = vec![AST::StandaloneExpr(
+            Expr::FunctionCall(
+                Box::new(Expr::MemberAccess(
+                    Box::new(Expr::Variable("method".into())),
+                    "call".into()
+                )),
+                vec![]
+            ))];
         assert_eq!(expected, result);
     }
-
+    
     #[test]
     fn method_call_oneparam() {
         let tokens = tokenize("method.call(1)").unwrap();
         let result = parse_ast(tokens);
-        let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
-        let expected = vec![AST::Assign {
-            path: vec![String::from("x")],
-            expression: expr,
-        }];
+        let expected = vec![AST::StandaloneExpr(
+            Expr::FunctionCall(
+                Box::new(Expr::MemberAccess(
+                    Box::new(Expr::Variable("method".into())),
+                    "call".into()
+                )),
+                vec![Expr::IntegerValue(1)]
+            ))];
         assert_eq!(expected, result);
     }
 
@@ -2543,12 +2807,15 @@ def function(x):
     fn method_call_manyparam() {
         let tokens = tokenize("method.call(1, 2)").unwrap();
         let result = parse_ast(tokens);
-        let expr = Expr::Array(vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]);
-        let expected = vec![AST::Assign {
-            path: vec![String::from("x")],
-            expression: expr,
-        }];
+        let expected = vec![AST::StandaloneExpr(
+            Expr::FunctionCall(
+                Box::new(Expr::MemberAccess(
+                    Box::new(Expr::Variable("method".into())),
+                    "call".into()
+                )),
+                vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]
+            ))];
         assert_eq!(expected, result);
     }
-    */
+    
 }

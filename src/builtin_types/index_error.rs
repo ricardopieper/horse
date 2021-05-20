@@ -4,9 +4,10 @@ use crate::runtime::memory::*;
 
 
 fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+    let call_params = params.as_method();
+    check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
     let self_data = runtime
-        .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
+        .get_raw_data_of_pyobj(call_params.bound_pyobj)
         .take_string()
         .clone();
     runtime.allocate_builtin_type_byname_raw(
@@ -16,9 +17,10 @@ fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
 }
 
 fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+    let call_params = params.as_method();
+    check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
     let self_data = runtime
-        .get_raw_data_of_pyobj(params.bound_pyobj.unwrap())
+        .get_raw_data_of_pyobj(call_params.bound_pyobj)
         .take_string()
         .clone();
     runtime.allocate_builtin_type_byname_raw(

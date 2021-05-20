@@ -28,3 +28,6 @@ def assert_both_methods_work2(x, y):
 
 assert_both_methods_work()
 assert_both_methods_work2(21, 8)
+assert_both_methods_work2(34, 9)
+assert_both_methods_work2(55, 10)
+assert_both_methods_work2(89, 11)

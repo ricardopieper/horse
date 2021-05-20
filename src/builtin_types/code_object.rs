@@ -3,8 +3,9 @@ use crate::runtime::datamodel::*;
 use crate::runtime::memory::*;
 
 fn get_bytecode(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
-    let self_data = runtime.get_function_bytecode(params.bound_pyobj.unwrap());
+    let call_params = params.as_method();
+    check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
+    let self_data = runtime.get_function_bytecode(call_params.bound_pyobj);
 
     let mut bytecode_repr = String::from("");
 

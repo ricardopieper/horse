@@ -14,9 +14,10 @@ where
 {
     let func = PyCallable {
         code: Box::new(move |runtime, params| -> MemoryAddress {
-            check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
-            let value_type_name = runtime.get_pyobj_type_name(params.params[0]);
-            let other_value = runtime.get_raw_data_of_pyobj(params.params[0]);
+            let call_params = params.as_function();
+            check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
+            let value_type_name = runtime.get_pyobj_type_name(call_params.params[0]);
+            let other_value = runtime.get_raw_data_of_pyobj(call_params.params[0]);
 
             return match value_type_name {
                 "int" => {
@@ -37,7 +38,7 @@ where
             };
         }),
     };
-    return runtime.create_callable_pyobj(func, Some(name.to_string()));
+    return runtime.create_unbounded_callable_pyobj(func, Some(name.to_string()));
 }
 
 pub fn register_builtin_functions(runtime: &mut Runtime) {
