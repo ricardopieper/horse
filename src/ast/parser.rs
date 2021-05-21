@@ -9,6 +9,7 @@ pub enum Expr {
     BooleanValue(bool),
     None,
     FunctionCall(Box<Expr>, Vec<Expr>),
+    IndexAccess(Box<Expr>, Box<Expr>),
     Variable(String),
     BinaryOperation(Box<Expr>, Operator, Box<Expr>),
     Parenthesized(Box<Expr>),
@@ -788,21 +789,17 @@ impl Parser {
 
         return Ok(results);
     }
-/**
- * 
- *          //if we parsed some expression and we find an open paren... this might be a function call.
-            //it's time to support generic funcion call syntax, not only on names.
-           
- * 
- */
+    /**
+    *
+    *          //if we parsed some expression and we find an open paren... this might be a function call.
+               //it's time to support generic funcion call syntax, not only on names.
 
-    fn function_call_helper(&mut self, expr_callable: &Expr) -> Result<Expr, ParsingError> {
+    *
+    */
 
+    fn index_access_helper(&mut self, expr_list_or_array: &Expr) -> Result<Expr, ParsingError> {
         if let Token::CloseParen = self.cur() {
-            return Ok(Expr::FunctionCall(
-                Box::new(expr_callable.clone()),
-                vec![],
-            ));
+            panic!("Invalid syntax: must inform index value");
         } else {
             self.new_stack();
             let list_of_exprs = self.parse_comma_sep_list_expr();
@@ -812,11 +809,14 @@ impl Parser {
                 Ok(expressions) => {
                     //commit the result
                     let popped = self.pop_stack();
-                    let resulting_exprs = expressions.resulting_expr_list;
+                    let mut resulting_exprs = expressions.resulting_expr_list;
+                    if resulting_exprs.len() > 1 {
+                        panic!("Invalid syntax: must inform only one index");
+                    }
 
-                    let fcall = Expr::FunctionCall(
-                        Box::new(expr_callable.clone()),
-                        resulting_exprs,
+                    let fcall = Expr::IndexAccess(
+                        Box::new(expr_list_or_array.clone()),
+                        Box::new(resulting_exprs.pop().unwrap()),
                     );
 
                     self.set_cur(&popped);
@@ -829,7 +829,35 @@ impl Parser {
                 }
             }
         }
+    }
 
+    fn function_call_helper(&mut self, expr_callable: &Expr) -> Result<Expr, ParsingError> {
+        if let Token::CloseParen = self.cur() {
+            return Ok(Expr::FunctionCall(Box::new(expr_callable.clone()), vec![]));
+        } else {
+            self.new_stack();
+            let list_of_exprs = self.parse_comma_sep_list_expr();
+
+            match list_of_exprs {
+                //try parse stuff
+                Ok(expressions) => {
+                    //commit the result
+                    let popped = self.pop_stack();
+                    let resulting_exprs = expressions.resulting_expr_list;
+
+                    let fcall =
+                        Expr::FunctionCall(Box::new(expr_callable.clone()), resulting_exprs);
+
+                    self.set_cur(&popped);
+
+                    return Ok(fcall);
+                }
+                Err(e) => {
+                    eprintln!("Failed parsing exprssion: {:?}", e);
+                    return Err(e);
+                }
+            }
+        }
     }
 
     pub fn parse_expr(&mut self) -> Result<ParseExpressionResult, ParsingError> {
@@ -850,7 +878,7 @@ impl Parser {
                         //when parsing an open paren, it can either be a parenthesized expression, or a function call.
                         //A parenthesized expression can appear everywhere, and so does a function call.
                         //However, if the previous token was an operator, then the open paren can only be valid if we are
-                        //parsing a parenthesized expression. 
+                        //parsing a parenthesized expression.
                         //A function call open paren can only appear in the following scenarios:
                         // - An expression that hasn't been fully parsed yet like `an_identifier` but next token is `(`
                         // - `"a literal token"` and then `(` is also a valid function call. It just doesn't work in runtime. Same goes for int and float literals
@@ -868,7 +896,6 @@ impl Parser {
                         if self.operand_stack().len() == 0 {
                             could_be_fcall = false
                         }
-                    
                         if could_be_fcall {
                             //when we parse a funcion, we need to parse its arguments as well.
                             //however, the list of arguments is a list of expressions, and those expressions might be
@@ -882,14 +909,13 @@ impl Parser {
                             //Perhaps a better strategy is to make it a core function of the parser: Parse list of expressions instead of just a single expr.
                             //And we need the parse function to be more tolerant of tokens outside of expressions: if it finds something that doesn't look
                             //like it's part of an expression, then maybe we should just understand that the expression has been finished.
-                            
                             //Let's ensure that we have no operators pending
                             if !self.operand_stack().is_empty() {
                                 self.next();
                                 let current_expr = self.operand_stack_mut().pop().unwrap();
 
                                 //If the top expression is a binary operation, then we need to do a little bit of surgery.
-                                //The left side stays the same, but the right side needs adjustments 
+                                //The left side stays the same, but the right side needs adjustments
                                 //because the parenthesis invokes a call over the result of the whole right-side expr.
                                 match current_expr {
                                     Expr::BinaryOperation(left, op, right) => {
@@ -897,7 +923,7 @@ impl Parser {
                                         self.push_operand(Expr::BinaryOperation(
                                             left,
                                             op,
-                                            Box::new(right_side_fcall)
+                                            Box::new(right_side_fcall),
                                         ));
                                     }
                                     expr => {
@@ -908,7 +934,6 @@ impl Parser {
                             } else {
                                 //is just a normal expression, go back
                             }
-                                
                         } else {
                             self.new_stack(); //new parsing stack/state
                             self.next();
@@ -918,12 +943,11 @@ impl Parser {
                                     //worked
                                     //commit the result
                                     let resulting_expr = expr_result.resulting_expr;
-                                    let parenthesized = Expr::Parenthesized(Box::new(resulting_expr));
-    
+                                    let parenthesized =
+                                        Expr::Parenthesized(Box::new(resulting_expr));
                                     let popped = self.pop_stack();
                                     self.push_operand(parenthesized);
                                     self.set_cur(&popped);
-    
                                     was_operand = true;
                                 }
                                 Err(e) => {
@@ -934,25 +958,74 @@ impl Parser {
                         }
                     }
                     Token::OpenArrayBracket => {
-                        self.new_stack(); //new parsing stack/state
-                        self.next(); //move to the first token, out of the open array
-                        if let Token::CloseArrayBracket = self.cur() {
-                            self.push_operand(Expr::Array(vec![]));
-                        } else {
-                            let list_of_exprs = self.parse_comma_sep_list_expr();
-                            match list_of_exprs {
-                                //try parse stuff
-                                Ok(expressions) => {
-                                    //worked
-                                    //commit the result
-                                    let popped = self.pop_stack();
-                                    let resulting_exprs = expressions.resulting_expr_list;
-                                    self.push_operand(Expr::Array(resulting_exprs));
-                                    self.set_cur(&popped);
+                        let mut could_be_indexing = true;
+
+                        if let Some(Token::Operator(_)) = prev_token {
+                            //in this case, it could be operators being applied to 2 lists, like a concat
+                            could_be_indexing = false;
+                        }
+                        if let None = prev_token {
+                            //most certainly will be a new list
+                            could_be_indexing = false;
+                        }
+                        if self.operand_stack().len() == 0 {
+                            //no expression to access array onto
+                            could_be_indexing = false
+                        }
+                        if could_be_indexing {
+                            //in the future,
+                            //this part of the code will also suport range slicing
+                            //like list[2:3]
+                            //for now it doesn't
+
+                            if !self.operand_stack().is_empty() {
+                                self.next();
+                                let current_expr = self.operand_stack_mut().pop().unwrap();
+
+                                //If the top expression is a binary operation, then we need to do a little bit of surgery.
+                                //The left side stays the same, but the right side needs adjustments
+                                //because the parenthesis invokes an array access
+                                //over the result of the whole right-side expr.
+
+                                match current_expr {
+                                    Expr::BinaryOperation(left, op, right) => {
+                                        let right_side_index_access =
+                                            self.index_access_helper(&right)?;
+                                        self.push_operand(Expr::BinaryOperation(
+                                            left,
+                                            op,
+                                            Box::new(right_side_index_access),
+                                        ));
+                                    }
+                                    expr => {
+                                        let index_access = self.index_access_helper(&expr)?;
+                                        self.push_operand(index_access);
+                                    }
                                 }
-                                Err(e) => {
-                                    eprintln!("Failed parsing exprssion: {:?}", e);
-                                    return Err(e);
+                            } else {
+                                //is just a normal expression, go back
+                            }
+                        } else {
+                            self.new_stack(); //new parsing stack/state
+                            self.next(); //move to the first token, out of the open array
+                            if let Token::CloseArrayBracket = self.cur() {
+                                self.push_operand(Expr::Array(vec![]));
+                            } else {
+                                let list_of_exprs = self.parse_comma_sep_list_expr();
+                                match list_of_exprs {
+                                    //try parse stuff
+                                    Ok(expressions) => {
+                                        //worked
+                                        //commit the result
+                                        let popped = self.pop_stack();
+                                        let resulting_exprs = expressions.resulting_expr_list;
+                                        self.push_operand(Expr::Array(resulting_exprs));
+                                        self.set_cur(&popped);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed parsing exprssion: {:?}", e);
+                                        return Err(e);
+                                    }
                                 }
                             }
                         }
@@ -1015,8 +1088,6 @@ impl Parser {
             } else {
                 self.next();
             }
-
-            
 
             if was_operand {
                 //base case: there is only an operator and an operand, like "-1"
@@ -2182,7 +2253,7 @@ print(y)",
             Operator::Multiply,
             Box::new(Expr::FunctionCall(
                 Box::new(Expr::Variable(String::from("func"))),
-                vec![Expr::IntegerValue(1)]
+                vec![Expr::IntegerValue(1)],
             )),
         );
         assert_eq!(expected, result);
@@ -2195,10 +2266,10 @@ print(y)",
         let expected = Expr::BinaryOperation(
             Box::new(Expr::FunctionCall(
                 Box::new(Expr::Variable(String::from("func"))),
-                vec![Expr::IntegerValue(1)]
+                vec![Expr::IntegerValue(1)],
             )),
             Operator::Multiply,
-            (2).into()            
+            (2).into(),
         );
         assert_eq!(expected, result);
     }
@@ -2210,13 +2281,13 @@ print(y)",
         let expected = Expr::BinaryOperation(
             Box::new(Expr::FunctionCall(
                 Box::new(Expr::Variable(String::from("func"))),
-                vec![Expr::IntegerValue(1)]
+                vec![Expr::IntegerValue(1)],
             )),
             Operator::Multiply,
             Box::new(Expr::FunctionCall(
                 Box::new(Expr::Variable(String::from("func"))),
-                vec![Expr::IntegerValue(2)]
-            ))            
+                vec![Expr::IntegerValue(2)],
+            )),
         );
         assert_eq!(expected, result);
     }
@@ -2583,11 +2654,10 @@ print(y)",
         let tokens = tokenize("obj.prop = 1").unwrap();
         println!("{:?}", tokens);
         let result = parse_ast(tokens);
-        let expected = vec![
-            AST::Assign {
-                path: vec!["obj".into(), "prop".into()],
-                expression: Expr::IntegerValue(1)
-            }];
+        let expected = vec![AST::Assign {
+            path: vec!["obj".into(), "prop".into()],
+            expression: Expr::IntegerValue(1),
+        }];
         assert_eq!(expected, result);
     }
 
@@ -2774,32 +2844,93 @@ class SomeClass:
     }
 
     #[test]
-    fn method_call_empty() {
-        let tokens = tokenize("method.call()").unwrap();
+    fn access_at_index() {
+        let tokens = tokenize("list[1]").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::IndexAccess(
+            Box::new(Expr::Variable("list".into())),
+            Box::new(Expr::IntegerValue(1)),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn access_at_string() {
+        let tokens = tokenize("a_map[\"value\"]").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::IndexAccess(
+            Box::new(Expr::Variable("a_map".into())),
+            Box::new(Expr::StringValue("value".into())),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn access_at_list() {
+        //this is crazy
+        let tokens = tokenize("a_map[[]]").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::IndexAccess(
+            Box::new(Expr::Variable("a_map".into())),
+            Box::new(Expr::Array(vec![])),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_return_indexed() {
+        let tokens = tokenize("some_call()[1]").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::IndexAccess(
+            Box::new(Expr::FunctionCall(
+                Box::new(Expr::Variable("some_call".into())),
+                vec![],
+            )),
+            Box::new(Expr::IntegerValue(1)),
+        ))];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn function_argument_is_indexed() {
+        let tokens = tokenize("some_call(var[1])").unwrap();
         let result = parse_ast(tokens);
         let expected = vec![AST::StandaloneExpr(
             Expr::FunctionCall(
-                Box::new(Expr::MemberAccess(
-                    Box::new(Expr::Variable("method".into())),
-                    "call".into()
-                )),
-                vec![]
-            ))];
+                Box::new(Expr::Variable("some_call".into())),
+                vec![Expr::IndexAccess(
+                    Box::new(Expr::Variable("var".into())),
+                    Box::new(Expr::IntegerValue(1))
+                )],
+            )
+        )];
         assert_eq!(expected, result);
     }
-    
+
+    #[test]
+    fn method_call_empty() {
+        let tokens = tokenize("method.call()").unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(Expr::FunctionCall(
+            Box::new(Expr::MemberAccess(
+                Box::new(Expr::Variable("method".into())),
+                "call".into(),
+            )),
+            vec![],
+        ))];
+        assert_eq!(expected, result);
+    }
     #[test]
     fn method_call_oneparam() {
         let tokens = tokenize("method.call(1)").unwrap();
         let result = parse_ast(tokens);
-        let expected = vec![AST::StandaloneExpr(
-            Expr::FunctionCall(
-                Box::new(Expr::MemberAccess(
-                    Box::new(Expr::Variable("method".into())),
-                    "call".into()
-                )),
-                vec![Expr::IntegerValue(1)]
-            ))];
+        let expected = vec![AST::StandaloneExpr(Expr::FunctionCall(
+            Box::new(Expr::MemberAccess(
+                Box::new(Expr::Variable("method".into())),
+                "call".into(),
+            )),
+            vec![Expr::IntegerValue(1)],
+        ))];
         assert_eq!(expected, result);
     }
 
@@ -2807,15 +2938,13 @@ class SomeClass:
     fn method_call_manyparam() {
         let tokens = tokenize("method.call(1, 2)").unwrap();
         let result = parse_ast(tokens);
-        let expected = vec![AST::StandaloneExpr(
-            Expr::FunctionCall(
-                Box::new(Expr::MemberAccess(
-                    Box::new(Expr::Variable("method".into())),
-                    "call".into()
-                )),
-                vec![Expr::IntegerValue(1), Expr::IntegerValue(2)]
-            ))];
+        let expected = vec![AST::StandaloneExpr(Expr::FunctionCall(
+            Box::new(Expr::MemberAccess(
+                Box::new(Expr::Variable("method".into())),
+                "call".into(),
+            )),
+            vec![Expr::IntegerValue(1), Expr::IntegerValue(2)],
+        ))];
         assert_eq!(expected, result);
     }
-    
 }

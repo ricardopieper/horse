@@ -36,6 +36,7 @@ pub enum Instruction {
     CompareEquals,
     CompareNotEquals,
     BuildList { number_elements: usize },
+    IndexAccess,
     UnresolvedBreak,
     UnresolvedStoreAttr(String),
     UnresolvedStoreName(String),

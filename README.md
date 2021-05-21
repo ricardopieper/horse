@@ -67,6 +67,19 @@ When things are more figured out, the code in the interpreter will probably shri
 
 Also, some stuff may not be idiomatic Rust.
 
+About classes
+-------------
+
+When a class is declared, we just run the code inside the class declaration. Every declaration (store name)
+inside the class definition is declared in the scope of the class object (the type) itself.
+
+Classes are actually functions with bounded properties. 
+The class declaration itself is a function that, when called, creates a new `type` PyObject with bounded functions and attributes that can be changed from the outside. In some sense it is kinda like Javascript. 
+
+It also stores a function in the module with the same name as the class. This function creates a new object
+of the defined type, and then calls the `__init__` method on that object. 
+
+
 Bytecode
 --------
 

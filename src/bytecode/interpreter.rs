@@ -783,6 +783,16 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let name = &code.code.names[*attr_name];
             runtime.set_attribute(obj, name.clone(), value)
         }
+        Instruction::IndexAccess => {
+            let index_value = runtime.pop_stack();
+            let indexed_value = runtime.pop_stack();
+
+            //for now we only accept integer indexing on lists and strings
+            let index_int = runtime.get_raw_data_of_pyobj(index_value).take_int();
+            let list = runtime.get_raw_data_of_pyobj(indexed_value).take_list();
+
+            runtime.push_onto_stack(list[index_int as usize]);
+        }
         _ => {
             panic!("Unsupported instruction: {:?}", instruction);
         }
@@ -815,6 +825,7 @@ fn register_codeobj_consts(runtime: &Runtime, codeobj: &CodeObject) -> CodeObjec
     }
 }
 
+#[allow(dead_code)]
 //#[cfg(test)]
 fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
     for inst in codeobj.consts.iter() {
@@ -852,7 +863,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    print_codeobj(&program.code_objects[0], None);
+    //print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

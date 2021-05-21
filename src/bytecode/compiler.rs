@@ -138,6 +138,15 @@ fn compile_expr(expr: &Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instr
             });
             return final_instructions;
         },
+        Expr::IndexAccess(expr, index) =>  {
+            let mut final_instructions = vec![];
+            let indexed_value: Vec<Instruction> = compile_expr(expr, const_map);
+            let index_value: Vec<Instruction> = compile_expr(index, const_map);
+            final_instructions.extend(indexed_value);
+            final_instructions.extend(index_value);
+            final_instructions.push(Instruction::IndexAccess);
+            return final_instructions;
+        }
         Expr::Array(exprs) => {
             let mut final_instructions = vec![];
             let number_elements = exprs.len();
@@ -149,7 +158,8 @@ fn compile_expr(expr: &Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instr
             return final_instructions;
         },
         Expr::Variable(var_name) => vec![Instruction::UnresolvedLoadName(var_name.clone())],
-        Expr::Parenthesized(_) => panic!("Parenthesized expr should not leak to compiler")
+        Expr::Parenthesized(_) => panic!("Parenthesized expr should not leak to compiler"),
+        
     }
 }
 
