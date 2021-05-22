@@ -199,18 +199,22 @@ fn len(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     )
 }
 
-/*
+
 fn iter(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let call_params = params.as_method();
     check_builtin_func_params!(params.func_name.unwrap(), 0, call_params.params.len());
-    let this_list = runtime
-        .get_raw_data_of_pyobj(call_params.bound_pyobj)
-        .take_list();
-    
     //construct a list_iterator
-    //return it
-    
-}*/
+    //find it in builtin module
+    let iterator_class = runtime.find_in_module(MAIN_MODULE, "list_iterator").unwrap();
+    let new = runtime.try_load_function_addr(iterator_class);
+    let result = runtime.run_function(&mut vec![call_params.bound_pyobj], new, None);
+    //@TODO: Callers of run_function today have to call the pop_stack_frame() method, because
+    //some of them want to observe the modifications to the local namespace caused by the call (ex: class definitions)
+    //maybe there could be a better way to do it
+    runtime.pop_stack_frame();
+    //it is a function, call it
+    return result;
+}
 
 fn getitem(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let call_params = params.as_method();
@@ -242,7 +246,7 @@ pub fn register_list_type(runtime: &mut Runtime) -> MemoryAddress {
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__str__", to_str);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__len__", len);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "__getitem__", getitem);
-    //runtime.register_bounded_func(BUILTIN_MODULE, "list", "__iter__", iter);
+    runtime.register_bounded_func(BUILTIN_MODULE, "list", "__iter__", iter);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "append", append);
     runtime.register_bounded_func(BUILTIN_MODULE, "list", "extend", extend);
     runtime.builtin_type_addrs.list = list_type;

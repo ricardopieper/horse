@@ -667,6 +667,102 @@ impl Runtime {
         }
     }
 
+
+    pub fn try_load_function(&self, addr: MemoryAddress) -> &PyObject {
+        let obj = self.get_pyobj_byaddr(addr);
+        match &obj.structure {
+            PyObjectStructure::NativeCallable { .. } => obj,
+            PyObjectStructure::UserDefinedFunction{ .. } => obj,
+            PyObjectStructure::BoundMethod {..} => obj,
+            PyObjectStructure::Type { name, functions, .. } => {
+                let new = functions
+                    .get("__new__")
+                    .expect(format!("Type {} has no __new__ function", name).as_str());
+                self.get_pyobj_byaddr(*new)
+            }
+            _ => panic!("not callable: {:?}", unsafe {&*addr}),
+        }
+    }
+
+    pub fn try_load_function_addr(&self, addr: MemoryAddress) -> MemoryAddress {
+        let obj = self.get_pyobj_byaddr(addr);
+        match &obj.structure {
+            PyObjectStructure::NativeCallable { .. } => addr,
+            PyObjectStructure::UserDefinedFunction{ .. } => addr,
+            PyObjectStructure::BoundMethod {..} => addr,
+            PyObjectStructure::Type { name, functions, .. } => {
+                let new = functions
+                    .get("__new__")
+                    .expect(format!("Type {} has no __new__ function", name).as_str());
+                return *new;
+            }
+            _ => panic!("not callable: {:?}", unsafe {&*addr}),
+        }
+    }
+    
+
+    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> MemoryAddress {
+        let func_name = self.get_function_name(function_addr);
+        let pyobj_func = self.try_load_function(function_addr);
+    
+        match &pyobj_func.structure {
+            PyObjectStructure::NativeCallable { code, name, is_bound } => {
+                if *is_bound {
+                    let bounded = self.pop_stack();
+                    println!("Bounded function: {:?}", unsafe { &*bounded});
+                    temp_stack.push(bounded);
+                }
+                
+                temp_stack.reverse();
+                self.new_stack_frame(func_name);
+                let call_params = CallParams {
+                    func_address: function_addr,
+                    func_name: name.as_deref(),//.map(|x| x.as_str()),
+                    params: &temp_stack,
+                };
+                
+                let result = (code.code)(self, call_params);
+                self.increase_refcount(result);
+                result
+            }
+            PyObjectStructure::UserDefinedFunction {code, name} => {
+                let mut expected_number_args = code.code.params.len();
+                if let Some(_) = bound_addr {
+                    expected_number_args -= 1; //because self is already being passed
+                }
+                
+                if expected_number_args != temp_stack.len() {
+                    panic!("Function {} expects {} parameters, but {} were provided", name, code.code.params.len(), temp_stack.len());
+                }
+                temp_stack.reverse();
+    
+                self.new_stack_frame(func_name);
+                if let Some(a) = bound_addr {
+                    self.bind_local(0, a); 
+                    for (number, addr) in temp_stack.iter().enumerate() {
+                        self.bind_local(number + 1, *addr);
+                    }
+                } else {
+                    for (number, addr) in temp_stack.iter().enumerate() {
+                        self.bind_local(number, *addr);
+                    }
+                }
+                
+                //what a mess
+                crate::bytecode::interpreter::execute_code_object(self, &code);
+    
+                self.top_stack()
+    
+            }
+            PyObjectStructure::BoundMethod {function_address, bound_address} => {
+                self.run_function(temp_stack, *function_address, Some(*bound_address))
+            }
+            _ => {
+                panic!("Not a function at addr: {:?}", function_addr);
+            }
+        }
+    }
+
     pub fn callable_call(
         &self,
         callable_addr: MemoryAddress,

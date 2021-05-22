@@ -1,6 +1,6 @@
 class list_iterator:
     
-    def __init_(self, list):
+    def __init__(self, list):
         self.list = list
         self.index_cur = 0
 

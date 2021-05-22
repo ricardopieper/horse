@@ -6,66 +6,6 @@ use crate::runtime::memory::*;
 
 //use smallvec::{smallvec, SmallVec};
 
-pub fn run_function(runtime: &Runtime, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> MemoryAddress {
-    let func_name = runtime.get_function_name(function_addr);
-    let pyobj_func = try_load_function(runtime, function_addr);
-
-    match &pyobj_func.structure {
-        PyObjectStructure::NativeCallable { code, name, is_bound } => {
-            if *is_bound {
-                let bounded = runtime.pop_stack();
-                println!("Bounded function: {:?}", unsafe { &*bounded});
-                temp_stack.push(bounded);
-            }
-            
-            temp_stack.reverse();
-            runtime.new_stack_frame(func_name);
-            let call_params = CallParams {
-                func_address: function_addr,
-                func_name: name.as_deref(),//.map(|x| x.as_str()),
-                params: &temp_stack,
-            };
-            
-            let result = (code.code)(runtime, call_params);
-            runtime.increase_refcount(result);
-            result
-        }
-        PyObjectStructure::UserDefinedFunction {code, name} => {
-            let mut expected_number_args = code.code.params.len();
-            if let Some(_) = bound_addr {
-                expected_number_args -= 1; //because self is already being passed
-            }
-            
-            if expected_number_args != temp_stack.len() {
-                panic!("Function {} expects {} parameters, but {} were provided", name, code.code.params.len(), temp_stack.len());
-            }
-            temp_stack.reverse();
-
-            runtime.new_stack_frame(func_name);
-            if let Some(a) = bound_addr {
-                runtime.bind_local(0, a); 
-                for (number, addr) in temp_stack.iter().enumerate() {
-                    runtime.bind_local(number + 1, *addr);
-                }
-            } else {
-                for (number, addr) in temp_stack.iter().enumerate() {
-                    runtime.bind_local(number, *addr);
-                }
-            }
-            
-            execute_code_object(runtime, &code);
-
-            runtime.top_stack()
-
-        }
-        PyObjectStructure::BoundMethod {function_address, bound_address} => {
-            run_function(runtime, temp_stack, *function_address, Some(*bound_address))
-        }
-        _ => {
-            panic!("Not a function at addr: {:?}", function_addr);
-        }
-    }
-}
 
 pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
     let mut temp_stack = vec![];
@@ -80,7 +20,7 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
         runtime.increase_refcount(*addr);
     }
 
-    let returned_value = run_function(runtime, &mut temp_stack, function_addr, None);
+    let returned_value = runtime.run_function(&mut temp_stack, function_addr, None);
 
     //increase refcount so it survives the pop_stack_frame call. Returned value should have 
     let refcount = runtime.get_refcount(returned_value);
@@ -550,22 +490,6 @@ fn handle_binary_truediv(runtime: &Runtime) {
     }
 }
 
-pub fn try_load_function(runtime: &Runtime, addr: MemoryAddress) -> &PyObject {
-    let obj = runtime.get_pyobj_byaddr(addr);
-    match &obj.structure {
-        PyObjectStructure::NativeCallable { .. } => obj,
-        PyObjectStructure::UserDefinedFunction{ .. } => obj,
-        PyObjectStructure::BoundMethod {..} => obj,
-        PyObjectStructure::Type { name, functions, .. } => {
-            let new = functions
-                .get("__new__")
-                .expect(format!("Type {} has no __new__ function", name).as_str());
-            runtime.get_pyobj_byaddr(*new)
-        }
-        _ => panic!("not callable: {:?}", unsafe {&*addr}),
-    }
-}
-
 pub fn handle_load_name(runtime: &Runtime, code_obj: &CodeObjectContext, name: usize) {
     match runtime.get_local(name) {
         Some(addr) => runtime.push_onto_stack(addr),
@@ -645,6 +569,7 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
+    println!("Instruction: {:?}", instruction);
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
         Instruction::CallFunction { number_arguments } => handle_function_call(runtime, *number_arguments),
@@ -688,7 +613,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
 
             let class_name = runtime.get_pyobj_byaddr(name).try_get_builtin().unwrap().take_string().clone();
 
-            let pyobj_func = try_load_function(runtime, codeobj);
+            let pyobj_func = runtime.try_load_function(codeobj);
 
             //call the codeobj
 
@@ -753,7 +678,9 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
                                     _ => panic!("Unexpected")
                                 }
                             },
-                            None => {}
+                            None => {
+                                panic!("Method __init__ does not exist on object {:?}", unsafe {&*type_addr})
+                            }
                         };
                      
                         return instance;
@@ -812,7 +739,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     }
 }
 
-fn execute_code_object(runtime: &Runtime, code: &CodeObjectContext) {
+pub fn execute_code_object(runtime: &Runtime, code: &CodeObjectContext) {
     loop {
         if runtime.get_pc() >= code.code.instructions.len() {
             return;
