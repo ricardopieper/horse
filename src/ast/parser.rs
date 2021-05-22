@@ -56,6 +56,7 @@ pub enum AST {
     },
     Break,
     Return(Option<Expr>),
+    Raise(Expr),
 }
 
 impl Expr {
@@ -735,6 +736,35 @@ impl Parser {
                             results.push(AST::Return(Some(expr.resulting_expr)));
                         } else {
                             results.push(AST::Return(None));
+                        }
+                        parsed_successfully = true;
+                        let popped = self.pop_stack();
+                        //correct indentation found: commit
+                        self.set_cur(&popped);
+                        assert!(
+                            !self.is_not_end() || self.cur_is_newline(),
+                            "Newline or EOF expected after if block, got {:?}",
+                            self.cur_opt()
+                        );
+                    }
+                    _ => {
+                        parsed_successfully = false;
+                        self.pop_stack();
+                    }
+                }
+            }
+
+            if !parsed_successfully {
+                self.new_stack();
+                let tok = self.cur();
+                match tok {
+                    Token::RaiseKeyword => {
+                        self.next();
+                        if self.can_go() {
+                            let expr = self.parse_expr()?;
+                            results.push(AST::Raise(expr.resulting_expr));
+                        } else {
+                            panic!("Must inform expression with raise keyword")
                         }
                         parsed_successfully = true;
                         let popped = self.pop_stack();

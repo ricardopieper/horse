@@ -727,7 +727,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
                         runtime.register_method_addr_on_type(type_addr, key, *value);
                     }
 
-                    runtime.register_type_unbounded_func(type_addr, "__new__", move |method_runtime: &Runtime, _params: CallParams| -> MemoryAddress {
+                    runtime.register_type_unbounded_func(type_addr, "__new__", move |method_runtime: &Runtime, call_params: CallParams| -> MemoryAddress {
                         let instance = method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance);
                         method_runtime.increase_refcount(instance);
                         method_runtime.increase_refcount(instance);
@@ -739,8 +739,14 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
                         
                                 match &pyobj_method.structure {
                                     PyObjectStructure::UserDefinedFunction {name, code} => {
+
                                         method_runtime.new_stack_frame(name.clone());
                                         method_runtime.bind_local(0, instance);
+
+                                        for (index, item) in call_params.params.iter().enumerate() {
+                                            method_runtime.bind_local(index + 1, *item);
+                                        }
+
                                         execute_code_object(method_runtime, code);
                                         method_runtime.pop_stack_frame();
                                     },
@@ -792,6 +798,10 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let list = runtime.get_raw_data_of_pyobj(indexed_value).take_list();
 
             runtime.push_onto_stack(list[index_int as usize]);
+        }
+        Instruction::Raise => {
+            let exception_value = runtime.pop_stack();
+            runtime.raise_exception(exception_value);
         }
         _ => {
             panic!("Unsupported instruction: {:?}", instruction);
@@ -863,7 +873,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    //print_codeobj(&program.code_objects[0], None);
+    print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

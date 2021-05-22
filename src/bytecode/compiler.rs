@@ -2,9 +2,9 @@ use crate::bytecode::program::*;
 use crate::ast::lexer::*;
 use crate::ast::parser::*;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
+fn process_constval(constval: Const, const_map: &mut BTreeMap<Const, usize>) -> Vec<Instruction> {
    let loadconst_idx = if !const_map.contains_key(&constval) {
         let len = const_map.len();
         const_map.insert(constval, len);
@@ -16,7 +16,7 @@ fn process_constval(constval: Const, const_map: &mut HashMap<Const, usize>) -> V
     return vec![Instruction::LoadConst(loadconst_idx)];
 }
 
-fn compile_expr(expr: &Expr, const_map: &mut HashMap<Const, usize>) -> Vec<Instruction> {
+fn compile_expr(expr: &Expr, const_map: &mut BTreeMap<Const, usize>) -> Vec<Instruction> {
     match expr {
         //TODO change Expr to Const(Const::Integer) so that it 
         //becomes easier to do this const stuff
@@ -169,7 +169,7 @@ struct ConstAndIndex {
 }
 
 pub fn resolve_loads_stores(code: &mut CodeObject) {
-    let mut names_indices = HashMap::new();
+    let mut names_indices = BTreeMap::new();
 
     for name in code.params.iter() {
         names_indices.insert(name.clone(), names_indices.len());
@@ -234,7 +234,7 @@ pub fn resolve_loads_stores(code: &mut CodeObject) {
 pub fn compile(ast: Vec<AST>) -> Program {
 
     let mut all_results = vec![];
-    let mut compile_result = compile_ast(ast, 0, &mut all_results, &mut HashMap::new());
+    let mut compile_result = compile_ast(ast, 0, &mut all_results, &mut BTreeMap::new());
     compile_result.main = true;
     resolve_loads_stores(&mut compile_result);
     
@@ -275,7 +275,7 @@ fn generate_assign_path(remaining_parts: &[String], is_first: bool) -> Vec<Instr
     return instructions;
 }
 
-pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
+pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
     for ast_item in ast {
         match ast_item {
@@ -303,22 +303,10 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.push(Instruction::ReturnValue);
             }
             AST::ClassDeclaration{class_name, body} => {
-                let mut new_const_map = HashMap::new();
+                let mut new_const_map = BTreeMap::new();
                 let mut class_decl_function = compile_ast(body, 0, results, &mut new_const_map);
                 class_decl_function.main = false;
-                match class_decl_function.instructions.last().unwrap() {
-                    Instruction::ReturnValue => { /*unchanged*/ },
-                    _ => {
-                        //@TODO redo this
-                        if !new_const_map.contains_key(&Const::None) {
-                            new_const_map.insert(Const::None, new_const_map.len());
-                            class_decl_function.consts.push(Const::None);
-                        }
-                        //println!("{:#?}", new_const_map);
-                        class_decl_function.instructions.push(Instruction::LoadConst(new_const_map[&Const::None]));
-                        class_decl_function.instructions.push(Instruction::ReturnValue);
-                    }
-                }
+                
                 resolve_loads_stores(&mut class_decl_function);
                 let constval_code = Const::CodeObject(class_decl_function, class_name.clone());
                 let mut code_idx = process_constval(constval_code, const_map);
@@ -331,22 +319,10 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.push(Instruction::UnresolvedStoreName(class_name.clone()));
             }
             AST::DeclareFunction{function_name, parameters, body} => {
-                let mut new_const_map = HashMap::new();
+                let mut new_const_map = BTreeMap::new();
                 let mut func_instructions = compile_ast(body, 0, results, &mut new_const_map);
                 func_instructions.main = false;
-                match func_instructions.instructions.last().unwrap() {
-                    Instruction::ReturnValue => { /*unchanged*/ },
-                    _ => {
-                        //@TODO redo this
-                        if !new_const_map.contains_key(&Const::None) {
-                            new_const_map.insert(Const::None, new_const_map.len());
-                            func_instructions.consts.push(Const::None);
-                        }
-                        //println!("{:#?}", new_const_map);
-                        func_instructions.instructions.push(Instruction::LoadConst(new_const_map[&Const::None]));
-                        func_instructions.instructions.push(Instruction::ReturnValue);
-                    }
-                }
+               
 
                 func_instructions.params = parameters.clone();
                 resolve_loads_stores(&mut func_instructions);
@@ -362,11 +338,65 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.push(Instruction::UnresolvedStoreName(function_name.clone()));
                 
             }
-            AST::ForStatement{item_name:_, list_expression: _, body: _} => {
-            
-            
-                unimplemented!(); 
-            
+            AST::ForStatement{item_name, list_expression, body} => {
+                //this should behave like this:
+                /*
+                iterator = list_expression.__iter__()
+                while True:
+                    try:
+                        item = iterator.__next__()
+                        {body}
+                    except err as StopException e:
+                        break;
+
+                */
+
+                //I'd like to do this by transforming AST into a while statement,
+                //but for now I don't have support for exceptions in the AST (or bytecode),
+                //although you can raise them. Would be slower than python's way, but it would be cool :)
+                
+                //let's just copy python then
+
+                
+
+
+                let list_expr_instructions = compile_expr(&list_expression, const_map);
+                all_instructions.extend(list_expr_instructions);
+
+                all_instructions.push(Instruction::LoadAttr("__iter__".into()));
+                all_instructions.push(Instruction::CallFunction{ number_arguments: 0 });
+                
+                let offset_before_for = all_instructions.len() + offset;
+                //The for iter will call _next__() on the iterator and push it to the stack
+                //Need to compute the body first to get an offset
+                //and then we add to the beginning of the loop the ForIter instruction
+
+                let compiled_body = compile_ast(body, offset_before_for, results, const_map);
+                let mut body_instructions = vec![];
+                body_instructions.push(Instruction::UnresolvedStoreName(item_name.clone()));
+                body_instructions.extend(compiled_body.instructions);
+                
+                //+2 because we are considering the ForIter and JumpUnconditional instructions
+                //before generating the instructions
+                let offset_after_loop = offset_before_for + body_instructions.len() + 2;
+                
+                let mut compiled_body_with_resolved_breaks: Vec<Instruction> = body_instructions
+                    .into_iter()
+                    .map(|instr| -> Instruction {
+                        if let Instruction::UnresolvedBreak = instr {
+                            Instruction::JumpUnconditional(offset_after_loop)
+                        } else {
+                            instr
+                        }
+                    })
+                    .collect();
+                
+                //create the loop now, pointing to the end of the loop
+                compiled_body_with_resolved_breaks.insert(0, Instruction::ForIter(offset_after_loop));
+                //this has to jump back to the ForIter instruction so it loops
+                compiled_body_with_resolved_breaks.push(Instruction::JumpUnconditional(offset_before_for));
+       
+                all_instructions.extend(compiled_body_with_resolved_breaks);
             
             },
             AST::IfStatement {
@@ -436,7 +466,11 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.append(&mut compiled_body_with_resolved_breaks);
                 all_instructions.push(Instruction::JumpUnconditional(offset_before_while));
             }
-           
+            AST::Raise(expr) => {
+                let mut if_expr_compiled = compile_expr(&expr, const_map);
+                all_instructions.append(&mut if_expr_compiled);
+                all_instructions.push(Instruction::Raise);
+            }
             AST::Break => {
                 //In python there's something called a "block stack" and an opcode called POP_BLOCK
                 //that makes this much easier, as well as a BREAK_LOOP instruction that uses block information
@@ -456,10 +490,10 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
 }
 
 
-fn make_code_object(instrs: Vec<Instruction>, const_map: &mut HashMap<Const, usize>) -> CodeObject {
+fn make_code_object(instrs: Vec<Instruction>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
 
     let mut vec_const = vec![];
-    for (constval, index) in const_map {
+    for (constval, index) in const_map.iter() {
         vec_const.push(ConstAndIndex {
             constval: constval.clone(),
             index: *index
@@ -467,13 +501,28 @@ fn make_code_object(instrs: Vec<Instruction>, const_map: &mut HashMap<Const, usi
     }
     vec_const.sort_unstable_by(|a, b| a.index.cmp(&b.index));
 
-    return CodeObject {
+    let mut code_obj = CodeObject {
         instructions: instrs,
         names: vec![],
         params: vec![],
         consts: vec_const.into_iter().map(|x| x.constval).collect(),
         main: false
     };
+
+    match code_obj.instructions.last().unwrap() {
+        Instruction::ReturnValue => { /*unchanged*/ },
+        _ => {
+            //@TODO redo this
+            if !const_map.contains_key(&Const::None) {
+                const_map.insert(Const::None, const_map.len());
+                code_obj.consts.push(Const::None);
+            }
+            //println!("{:#?}", new_const_map);
+            code_obj.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+            code_obj.instructions.push(Instruction::ReturnValue);
+        }
+    }
+    return code_obj;
 }
 
 #[cfg(test)]
@@ -511,7 +560,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
@@ -524,7 +573,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 1.0);
     }
@@ -537,7 +586,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
@@ -550,7 +599,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 0);
     }
@@ -563,7 +612,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 2);
     }
@@ -577,7 +626,7 @@ mod tests {
         println!("AST: {:?}", expr);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 4.5);
     }
@@ -592,7 +641,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -607,7 +656,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -622,7 +671,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -636,7 +685,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -652,7 +701,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -666,7 +715,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.pop_stack();
+        let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
@@ -692,7 +741,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.top_stack();
+        let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_string();
         assert_eq!(stack_value, "abccde");
     }
@@ -703,9 +752,9 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("True and False").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.top_stack();
+        let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
         assert_eq!(stack_value, 0);
     }
@@ -719,7 +768,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.top_stack();
+        let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::NativeCallable {
@@ -745,7 +794,7 @@ mod tests {
         let expr = parse_ast(tokens);
         let program =  compile(expr);
         interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.top_stack();
+        let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::Type {

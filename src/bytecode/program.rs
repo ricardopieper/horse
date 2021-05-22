@@ -1,6 +1,6 @@
 use crate::commons::float::Float;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Const {
     Integer(i128),
     Float(Float),
@@ -10,7 +10,7 @@ pub enum Const {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Instruction {
     LoadConst(usize),
     LoadAttr(String),
@@ -37,13 +37,15 @@ pub enum Instruction {
     CompareNotEquals,
     BuildList { number_elements: usize },
     IndexAccess,
+    ForIter(usize),
+    Raise,
     UnresolvedBreak,
     UnresolvedStoreAttr(String),
     UnresolvedStoreName(String),
-    UnresolvedLoadName(String),
+    UnresolvedLoadName(String)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CodeObject {
     pub instructions: Vec<Instruction>,
     pub names: Vec<String>,
