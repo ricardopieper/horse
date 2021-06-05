@@ -10,10 +10,12 @@ def weird_logic(x):
 
 sum = 0
 current = 1
-while current < 10:
+while current < 1000:
     val = double(current)
     val = val + weird_logic(current)
     sum = sum + val
     current = current + 1
+    printstack()
 
-assert_eq(380, sum)
+assert_eq(3998000, sum)
+assert_eq(1000, current)

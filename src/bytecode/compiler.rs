@@ -282,7 +282,7 @@ fn build_fully_qualified_name(prefix: Option<String>, name: &str) -> String {
     }
 }
 
-pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Option<String>, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
+pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Option<String>, ensure_return: bool, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
     let mut objname: String = "".to_string();
     for ast_item in ast {
@@ -315,7 +315,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let qualname = build_fully_qualified_name(qualified_prefix.clone(), &class_name);
 
                 let mut new_const_map = BTreeMap::new();
-                let mut class_decl_function = compile_ast_internal(body, 0, Some(qualname.clone()), results, &mut new_const_map);
+                let mut class_decl_function = compile_ast_internal(body, 0, Some(qualname.clone()), true, results, &mut new_const_map);
                 class_decl_function.main = false;
                 resolve_loads_stores(&mut class_decl_function);
                 let constval_code = Const::CodeObject(class_decl_function);
@@ -333,7 +333,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let qualname = build_fully_qualified_name(qualified_prefix.clone(), &function_name);
 
                 let mut new_const_map = BTreeMap::new();
-                let mut func_instructions = compile_ast_internal(body, 0, Some(qualname.clone()), results, &mut new_const_map);
+                let mut func_instructions = compile_ast_internal(body, 0, Some(qualname.clone()), true, results, &mut new_const_map);
                 func_instructions.main = false;
                
                 func_instructions.params = parameters.clone();
@@ -369,8 +369,6 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 
                 //let's just copy python then
 
-                
-
 
                 let list_expr_instructions = compile_expr(&list_expression, const_map);
                 all_instructions.extend(list_expr_instructions);
@@ -383,7 +381,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 //Need to compute the body first to get an offset
                 //and then we add to the beginning of the loop the ForIter instruction
 
-                let compiled_body = compile_ast(body, offset_before_for, results, const_map);
+                let compiled_body = compile_ast_internal(body, 0, qualified_prefix.clone(), false, results, const_map);
                 let mut body_instructions = vec![];
                 body_instructions.push(Instruction::UnresolvedStoreName(item_name.clone()));
                 body_instructions.extend(compiled_body.instructions);
@@ -424,7 +422,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let offset_before_if = offset + all_instructions.len() + 1;
 
                 let mut true_branch_compiled =
-                    compile_ast(true_branch.statements, offset_before_if, results, const_map);
+                    compile_ast_internal(true_branch.statements, offset_before_if, qualified_prefix.clone(), false, results, const_map);
                 //generate a jump to the code right after the true branch
 
                 //if there is an else: statement, the true branch must jump to after the false branch
@@ -438,7 +436,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                     ));
                     all_instructions.append(&mut true_branch_compiled.instructions);
 
-                    let mut false_branch_compiled = compile_ast(else_ast, offset_after_true_branch, results, const_map);
+                    let mut false_branch_compiled = compile_ast_internal(else_ast, offset_after_true_branch, qualified_prefix.clone(), false, results, const_map);
 
                     //+1 because there will be an instruction
                     //in the true branch that will jump to *after* the false branch
@@ -459,7 +457,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let mut compiled_expr = compile_expr(&expression, const_map);
                 //+1 for the jump if false
                 let offset_after_expr = all_instructions.len() + compiled_expr.len() + 1;
-                let compiled_body = compile_ast(body, offset_after_expr, results, const_map);
+                let compiled_body = compile_ast_internal(body, offset_after_expr, qualified_prefix.clone(), false, results, const_map);
                 all_instructions.append(&mut compiled_expr);
                 let offset_after_body = offset_after_expr + compiled_body.instructions.len() + 1;
                 all_instructions.push(Instruction::JumpIfFalseAndPopStack(offset_after_body));
@@ -498,14 +496,14 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
         }
     }
 
-    make_code_object(all_instructions, objname, const_map)
+    make_code_object(all_instructions, objname, const_map, ensure_return)
 }
 
 pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
-    compile_ast_internal(ast,offset,None,results,const_map)
+    compile_ast_internal(ast,offset,None,true,results,const_map)
 }
 
-fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
+fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTreeMap<Const, usize>, ensure_return: bool) -> CodeObject {
 
     let mut vec_const = vec![];
     for (constval, index) in const_map.iter() {
@@ -525,17 +523,19 @@ fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTre
         objname: name
     };
 
-    match code_obj.instructions.last().unwrap() {
-        Instruction::ReturnValue => { /*unchanged*/ },
-        _ => {
-            //@TODO redo this
-            if !const_map.contains_key(&Const::None) {
-                const_map.insert(Const::None, const_map.len());
-                code_obj.consts.push(Const::None);
+    if ensure_return {
+        match code_obj.instructions.last().unwrap() {
+            Instruction::ReturnValue => { /*unchanged*/ },
+            _ => {
+                //@TODO redo this
+                if !const_map.contains_key(&Const::None) {
+                    const_map.insert(Const::None, const_map.len());
+                    code_obj.consts.push(Const::None);
+                }
+                //println!("{:#?}", new_const_map);
+                code_obj.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+                code_obj.instructions.push(Instruction::ReturnValue);
             }
-            //println!("{:#?}", new_const_map);
-            code_obj.instructions.push(Instruction::LoadConst(const_map[&Const::None]));
-            code_obj.instructions.push(Instruction::ReturnValue);
         }
     }
     return code_obj;

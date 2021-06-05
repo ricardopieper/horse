@@ -206,13 +206,12 @@ fn iter(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     //construct a list_iterator
     //find it in builtin module
     let iterator_class = runtime.find_in_module(MAIN_MODULE, "list_iterator").unwrap();
-    let new = runtime.try_load_function_addr(iterator_class);
+    let new = runtime.try_load_function_addr(iterator_class); //this is the __new__ method, try_load_function_addr automatically gets the __new__ function
     let result = runtime.run_function(&mut vec![call_params.bound_pyobj], new, None);
     //@TODO: Callers of run_function today have to call the pop_stack_frame() method, because
     //some of them want to observe the modifications to the local namespace caused by the call (ex: class definitions)
     //maybe there could be a better way to do it
     runtime.pop_stack_frame();
-    //it is a function, call it
     return result;
 }
 

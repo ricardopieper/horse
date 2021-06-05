@@ -12,7 +12,6 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
     for _ in 0..number_args {
         temp_stack.push(runtime.pop_stack());
     }
-    
 
     let function_addr = runtime.pop_stack();
 
@@ -715,6 +714,13 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let exception_value = runtime.pop_stack();
             runtime.raise_exception(exception_value);
         }
+        Instruction::ForIter(end_ptr) => {
+            //TOS is the iterator object
+            let iterator = runtime.top_stack();
+            let next = runtime.call_method(iterator, "__next__", &[]);
+
+            unimplemented!();
+        }
         _ => {
             panic!("Unsupported instruction: {:?}", instruction);
         }
@@ -785,7 +791,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    //print_codeobj(&program.code_objects[0], None);
+    print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

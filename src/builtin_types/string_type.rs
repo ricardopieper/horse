@@ -109,9 +109,8 @@ fn create_new(runtime: &Runtime, params: CallParams) -> MemoryAddress {
             .allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("")));
     } else {
         check_builtin_func_params!("str", 1, params.params.len());
-        let call_params = params.as_method();
         //try call the __str__ method on the parameter
-        let string_call = runtime.call_method(call_params.params[0], "__str__", &[]);
+        let string_call = runtime.call_method(params.params[0], "__str__", &[]);
         match string_call {
             Some(addr) => addr,
             None => panic!("Object passed to str does not have __str__ method"),

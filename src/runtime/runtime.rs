@@ -708,7 +708,10 @@ impl Runtime {
         match &pyobj_func.structure {
             PyObjectStructure::NativeCallable { code, name, is_bound } => {
                 if *is_bound {
-                    let bounded = self.pop_stack();
+                    let bounded = match bound_addr {
+                        Some(x) => x,
+                        None => self.pop_stack()
+                    };
                     println!("Bounded function: {:?}", unsafe { &*bounded});
                     temp_stack.push(bounded);
                 }
@@ -786,17 +789,7 @@ impl Runtime {
         let pyobj = self.get_pyobj_byaddr(bound_addr);
         self.get_method_addr_byname(pyobj.type_addr, method_name)
             .map(move |method_addr| {
-                let mut params_with_bound = vec![];
-                params_with_bound.push(bound_addr);
-                params_with_bound.extend(params);
-                self.callable_call(
-                    method_addr,
-                    CallParams {
-                        func_address: method_addr,
-                        func_name: Some(method_name),
-                        params: params_with_bound.as_slice(),
-                    },
-                )
+                self.run_function(&mut params.to_vec(), method_addr, Some(bound_addr))
             })
     }
 
