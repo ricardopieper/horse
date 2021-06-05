@@ -6,7 +6,7 @@ pub enum Const {
     Float(Float),
     Boolean(bool),
     String(String),
-    CodeObject(CodeObject, String),
+    CodeObject(CodeObject),
     None
 }
 
@@ -51,6 +51,7 @@ pub struct CodeObject {
     pub names: Vec<String>,
     pub params: Vec<String>,
     pub consts: Vec<Const>,
+    pub objname: String,
     pub main: bool
 }
 

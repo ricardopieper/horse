@@ -409,8 +409,8 @@ impl Runtime {
             } else {
                 return "unknown".to_owned();
             }
-        } else if let PyObjectStructure::UserDefinedFunction { name, .. } = &mut pyobj.structure {
-            return name.to_owned();
+        } else if let PyObjectStructure::UserDefinedFunction { qualname, .. } = &mut pyobj.structure {
+            return qualname.to_owned();
         } else {
             return "unknown".to_owned();
         }
@@ -499,12 +499,12 @@ impl Runtime {
     pub fn allocate_user_defined_function(
         &self,
         code: CodeObjectContext,
-        name: String,
+        qualname: String
     ) -> MemoryAddress {
         let obj = PyObject {
             properties: HashMap::new(),
             type_addr: self.builtin_type_addrs.code_object,
-            structure: PyObjectStructure::UserDefinedFunction { code, name },
+            structure: PyObjectStructure::UserDefinedFunction { code, qualname },
             is_const: true,
         };
         return self.allocate_and_write(obj);
@@ -725,14 +725,14 @@ impl Runtime {
                 self.increase_refcount(result);
                 result
             }
-            PyObjectStructure::UserDefinedFunction {code, name} => {
+            PyObjectStructure::UserDefinedFunction {code, qualname} => {
                 let mut expected_number_args = code.code.params.len();
                 if let Some(_) = bound_addr {
                     expected_number_args -= 1; //because self is already being passed
                 }
                 
                 if expected_number_args != temp_stack.len() {
-                    panic!("Function {} expects {} parameters, but {} were provided", name, code.code.params.len(), temp_stack.len());
+                    panic!("Function {} expects {} parameters, but {} were provided", qualname, code.code.params.len(), temp_stack.len());
                 }
                 temp_stack.reverse();
     

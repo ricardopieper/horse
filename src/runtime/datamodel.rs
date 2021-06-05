@@ -16,7 +16,8 @@ pub enum BuiltInTypeData {
     Float(Float),
     String(String),
     List(Vec<MemoryAddress>),
-    ClassInstance
+    ClassInstance,
+    CodeObject(CodeObjectContext)
 }
 
 impl ToString for BuiltInTypeData {
@@ -28,7 +29,9 @@ impl ToString for BuiltInTypeData {
             BuiltInTypeData::List(_i) => {
                 return "a list".into()
             },
-            BuiltInTypeData::ClassInstance => "class instance".to_owned()
+            BuiltInTypeData::ClassInstance => "class instance".to_owned(),
+            BuiltInTypeData::CodeObject(_) => "code object".to_owned()
+
         }
     }
 }
@@ -68,13 +71,20 @@ impl BuiltInTypeData {
             _ => panic!("Tried to transform something into string unexpectedly"),
         }
     }
+
+    pub fn take_code_object(&self) -> &CodeObjectContext {
+        match self {
+            BuiltInTypeData::CodeObject(cobj) => cobj,
+            _ => panic!("Tried to transform something into a code object unexpectedly"),
+        }
+    }
 }
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CodeObjectContext {
     pub code: CodeObject,
     pub consts: Vec<MemoryAddress>
 }
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct ProgramContext {
     pub code_objects: Vec<CodeObjectContext>,
 }
@@ -95,8 +105,8 @@ pub enum PyObjectStructure {
         is_bound: bool
     },
     UserDefinedFunction {
-        name: String,
-        code: CodeObjectContext
+        code: CodeObjectContext,
+        qualname: String,
     },
     BoundMethod {
         function_address: MemoryAddress,

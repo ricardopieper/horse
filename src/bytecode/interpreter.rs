@@ -55,8 +55,9 @@ fn get_const_memaddr(runtime: &Runtime, const_data: &Const) -> MemoryAddress {
         Const::String(s) => {
             runtime.allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(s.clone()))
         }
-        Const::CodeObject(codeobj, name) => {
-            runtime.allocate_user_defined_function(register_codeobj_consts(runtime, codeobj), name.clone())
+        Const::CodeObject(codeobj) => {
+            runtime.allocate_builtin_type_byname_raw("code object", BuiltInTypeData::CodeObject(
+                register_codeobj_consts(runtime, codeobj)))
         }
         Const::Boolean(b) => {
             if *b {
@@ -569,7 +570,7 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
-    println!("Instruction: {:?}", instruction);
+    //println!(">> {:?} at {:?}", instruction, code.code.objname);
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
         Instruction::CallFunction { number_arguments } => handle_function_call(runtime, *number_arguments),
@@ -599,109 +600,93 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             advance_pc = false;
         }
         Instruction::MakeFunction => {
-            let name = runtime.pop_stack();
-            let codeobj = runtime.pop_stack();
+            let name_addr = runtime.pop_stack();
+            let codeobj_addr = runtime.pop_stack();
 
-            let function_name = runtime.get_pyobj_byaddr(name).try_get_builtin().unwrap().take_string().clone();
+            let qualname = runtime.get_pyobj_byaddr(name_addr).try_get_builtin().unwrap().take_string().clone();
+            let codeobj = runtime.get_pyobj_byaddr(codeobj_addr).try_get_builtin().unwrap().take_code_object().clone();
 
-            runtime.add_to_module(MAIN_MODULE, &function_name, codeobj);
-            runtime.push_onto_stack(codeobj);
+            let function_addr = runtime.allocate_user_defined_function(codeobj, qualname.clone());
+            runtime.add_to_module(MAIN_MODULE, qualname.as_str(), function_addr);
+            runtime.push_onto_stack(function_addr);
         }
         Instruction::MakeClass => {
-            let name = runtime.pop_stack();
-            let codeobj = runtime.pop_stack();
+            let name_addr = runtime.pop_stack();
+            let codeobj_addr = runtime.pop_stack();
 
-            let class_name = runtime.get_pyobj_byaddr(name).try_get_builtin().unwrap().take_string().clone();
+            let class_name = runtime.get_pyobj_byaddr(name_addr).try_get_builtin().unwrap().take_string().clone();
 
-            let pyobj_func = runtime.try_load_function(codeobj);
-
-            //call the codeobj
-
-            //take the resulting namespace
-
-            //copy namespace
-
-            //create a type based on that
-            //register in module
+            let class_code = runtime.get_pyobj_byaddr(codeobj_addr).try_get_builtin().unwrap().take_code_object().clone();
                     
-            match &pyobj_func.structure {
-                PyObjectStructure::NativeCallable { .. } => {
-                    panic!("Unsupported: Native functions used in MakeClass instruction");
-                }
-                PyObjectStructure::UserDefinedFunction {code: class_code, ..} => {
-                    runtime.new_stack_frame(class_name.clone());
-                    //execute the class code
-                    execute_code_object(runtime, class_code);
+            runtime.new_stack_frame(class_name.clone());
+            //execute the class code
+            execute_code_object(runtime, &class_code);
 
-                    let mut namespace = std::collections::HashMap::<String, MemoryAddress>::new();
-                    
-                    //and observe what changed in the current stack frame namespace 
-                    let namespace_values = runtime.get_local_namespace();
-                    for (index, name) in class_code.code.names.iter().enumerate() {
-                        //Insert the value as-is in the namespace
-                        namespace.insert(name.clone(), namespace_values[index]);
-                    }
+            let mut namespace = std::collections::HashMap::<String, MemoryAddress>::new();
+            
+            //and observe what changed in the current stack frame namespace 
+            let namespace_values = runtime.get_local_namespace();
+            for (index, name) in class_code.code.names.iter().enumerate() {
+                //Insert the value as-is in the namespace
+                namespace.insert(name.clone(), namespace_values[index]);
+            }
 
-                    runtime.pop_stack_frame();
+            runtime.pop_stack_frame();
 
-                    let type_addr = runtime.create_type(MAIN_MODULE, &class_name.clone(), None);
+            let type_addr = runtime.create_type(MAIN_MODULE, &class_name.clone(), None);
 
-                    //Registers the regular functions on the type, even those that take the self parameter
-                    //They will be accessed using `ClassName.function_name`
-                    for (key, value) in namespace.iter() {
-                        runtime.register_method_addr_on_type(type_addr, key, *value);
-                    }
+            //Registers the regular functions on the type, even those that take the self parameter
+            //They will be accessed using `ClassName.function_name`
+            for (key, value) in namespace.iter() {
+                println!("Registering method addr {} on type {}", key, class_name);
+                runtime.register_method_addr_on_type(type_addr, key, *value);
+            }
 
-                    runtime.register_type_unbounded_func(type_addr, "__new__", move |method_runtime: &Runtime, call_params: CallParams| -> MemoryAddress {
-                        let instance = method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance);
-                        method_runtime.increase_refcount(instance);
-                        method_runtime.increase_refcount(instance);
-                        
-                        //run the __init__ method if it exists
-                        match method_runtime.get_method_addr_byname(type_addr, "__init__") {
-                            Some(init_addr) => {
-                                let pyobj_method = method_runtime.get_pyobj_byaddr(init_addr);
-                        
-                                match &pyobj_method.structure {
-                                    PyObjectStructure::UserDefinedFunction {name, code} => {
+            runtime.register_type_unbounded_func(type_addr, "__new__", move |method_runtime: &Runtime, call_params: CallParams| -> MemoryAddress {
+                let instance = method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance);
+                method_runtime.increase_refcount(instance);
+                method_runtime.increase_refcount(instance);
+                
+                //run the __init__ method if it exists
+                match method_runtime.get_method_addr_byname(type_addr, "__init__") {
+                    Some(init_addr) => {
+                        let pyobj_method = method_runtime.get_pyobj_byaddr(init_addr);
+                
+                        match &pyobj_method.structure {
+                            PyObjectStructure::UserDefinedFunction {code, ..} => {
 
-                                        method_runtime.new_stack_frame(name.clone());
-                                        method_runtime.bind_local(0, instance);
+                                method_runtime.new_stack_frame(code.code.objname.clone());
+                                method_runtime.bind_local(0, instance);
 
-                                        for (index, item) in call_params.params.iter().enumerate() {
-                                            method_runtime.bind_local(index + 1, *item);
-                                        }
-
-                                        execute_code_object(method_runtime, code);
-                                        method_runtime.pop_stack_frame();
-                                    },
-                                    _ => panic!("Unexpected")
+                                for (index, item) in call_params.params.iter().enumerate() {
+                                    method_runtime.bind_local(index + 1, *item);
                                 }
+
+                                execute_code_object(method_runtime, code);
+                                method_runtime.pop_stack_frame();
                             },
-                            None => {
-                                panic!("Method __init__ does not exist on object {:?}", unsafe {&*type_addr})
-                            }
-                        };
-                     
-                        return instance;
-                    });
+                            _ => panic!("Unexpected")
+                        }
+                    },
+                    None => {
+                        panic!("Method __init__ does not exist on object {:?}", unsafe {&*type_addr})
+                    }
+                };
+                
+                return instance;
+            });
 
 
 
-                  //  runtime.register_bounded_func_on_addr(type_addr, "__new__", move |method_runtime: &Runtime, _params: CallParams| -> MemoryAddress {
-                  //      method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance)
-                  //  });
+            //  runtime.register_bounded_func_on_addr(type_addr, "__new__", move |method_runtime: &Runtime, _params: CallParams| -> MemoryAddress {
+            //      method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance)
+            //  });
 
-                    runtime.push_onto_stack(type_addr);
+            runtime.push_onto_stack(type_addr);
 
 
-                }
-                _ => {
-                    panic!("Not a class at addr: {:?}", codeobj);
-                }
-            };
-           // runtime.add_to_module(MAIN_MODULE, &function_name, codeobj);
-           // runtime.push_onto_stack(codeobj);
+                
+            
         }
         Instruction::ReturnValue => {
             let top = runtime.top_stack();
@@ -766,8 +751,8 @@ fn register_codeobj_consts(runtime: &Runtime, codeobj: &CodeObject) -> CodeObjec
 //#[cfg(test)]
 fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
     for inst in codeobj.consts.iter() {
-        if let Const::CodeObject(obj, name) = inst {
-            print_codeobj(obj, Some(name.clone()));
+        if let Const::CodeObject(obj) = inst {
+            print_codeobj(obj, Some(obj.objname.clone()));
         }
     }
 
@@ -775,8 +760,8 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
     for (index, inst) in codeobj.instructions.iter().enumerate() {
         if let Instruction::LoadConst(n) = inst {
             let constval =  &codeobj.consts[*n];
-            if let Const::CodeObject(_, name) = constval {
-                println!("{} - {:?} => code object {}", index, inst, name);
+            if let Const::CodeObject(obj) = constval {
+                println!("{} - {:?} => code object {}", index, inst, obj.objname);
             } else {
                 println!("{} - {:?} => constval = {:?}", index, inst, constval);
             }
@@ -800,7 +785,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    print_codeobj(&program.code_objects[0], None);
+    //print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

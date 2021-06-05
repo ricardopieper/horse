@@ -275,8 +275,16 @@ fn generate_assign_path(remaining_parts: &[String], is_first: bool) -> Vec<Instr
     return instructions;
 }
 
-pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
+fn build_fully_qualified_name(prefix: Option<String>, name: &str) -> String {
+    match prefix {
+        Some(s) => (s + "." + name).to_string(),
+        None => name.to_string()
+    }
+}
+
+pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Option<String>, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
+    let mut objname: String = "".to_string();
     for ast_item in ast {
         match ast_item {
             AST::Assign {
@@ -303,14 +311,16 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.push(Instruction::ReturnValue);
             }
             AST::ClassDeclaration{class_name, body} => {
+                objname = class_name.clone();
+                let qualname = build_fully_qualified_name(qualified_prefix.clone(), &class_name);
+
                 let mut new_const_map = BTreeMap::new();
-                let mut class_decl_function = compile_ast(body, 0, results, &mut new_const_map);
+                let mut class_decl_function = compile_ast_internal(body, 0, Some(qualname.clone()), results, &mut new_const_map);
                 class_decl_function.main = false;
-                
                 resolve_loads_stores(&mut class_decl_function);
-                let constval_code = Const::CodeObject(class_decl_function, class_name.clone());
+                let constval_code = Const::CodeObject(class_decl_function);
                 let mut code_idx = process_constval(constval_code, const_map);
-                let constval_name = Const::String(class_name.clone());
+                let constval_name = Const::String(qualname.clone());
                 let mut name_idx = process_constval(constval_name, const_map);
 
                 all_instructions.append(&mut code_idx);
@@ -319,17 +329,19 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 all_instructions.push(Instruction::UnresolvedStoreName(class_name.clone()));
             }
             AST::DeclareFunction{function_name, parameters, body} => {
+                objname = function_name.clone();
+                let qualname = build_fully_qualified_name(qualified_prefix.clone(), &function_name);
+
                 let mut new_const_map = BTreeMap::new();
-                let mut func_instructions = compile_ast(body, 0, results, &mut new_const_map);
+                let mut func_instructions = compile_ast_internal(body, 0, Some(qualname.clone()), results, &mut new_const_map);
                 func_instructions.main = false;
                
-
                 func_instructions.params = parameters.clone();
                 resolve_loads_stores(&mut func_instructions);
 
-                let constval_code = Const::CodeObject(func_instructions, function_name.clone());
+                let constval_code = Const::CodeObject(func_instructions);
                 let mut code_idx = process_constval(constval_code, const_map);
-                let constval_name = Const::String(function_name.clone());
+                let constval_name = Const::String(qualname.clone());
                 let mut name_idx = process_constval(constval_name, const_map);
 
                 all_instructions.append(&mut code_idx);
@@ -352,7 +364,7 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
                 */
 
                 //I'd like to do this by transforming AST into a while statement,
-                //but for now I don't have support for exceptions in the AST (or bytecode),
+                //but for now I don't have support for try/except in the AST (or bytecode),
                 //although you can raise them. Would be slower than python's way, but it would be cool :)
                 
                 //let's just copy python then
@@ -486,11 +498,14 @@ pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, 
         }
     }
 
-    make_code_object(all_instructions, const_map)
+    make_code_object(all_instructions, objname, const_map)
 }
 
+pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
+    compile_ast_internal(ast,offset,None,results,const_map)
+}
 
-fn make_code_object(instrs: Vec<Instruction>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
+fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
 
     let mut vec_const = vec![];
     for (constval, index) in const_map.iter() {
@@ -506,7 +521,8 @@ fn make_code_object(instrs: Vec<Instruction>, const_map: &mut BTreeMap<Const, us
         names: vec![],
         params: vec![],
         consts: vec_const.into_iter().map(|x| x.constval).collect(),
-        main: false
+        main: false,
+        objname: name
     };
 
     match code_obj.instructions.last().unwrap() {

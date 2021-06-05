@@ -1,4 +1,5 @@
 class SomeClass:
+
     def __init__(self):
         self.x = 2
 
