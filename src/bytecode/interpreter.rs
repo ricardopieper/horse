@@ -85,15 +85,15 @@ pub fn curry_self(runtime: &Runtime, function: MemoryAddress, self_object: Memor
 }
 
 pub fn handle_load_attr(runtime: &Runtime, attr_name: &str) {
-    let stack_top = runtime.top_stack();
+    let stack_top = runtime.pop_stack();
 
     //if the object is a class instance, we need to check whether 
     //the loaded property is a function.
     //if so, then we need to push a new value on the stack, 
     //which will be a bounded function to the stack_top value
     //i.e. it will be passed to the function as the "self" parameter 
-
     let pyobj = runtime.get_pyobj_byaddr(stack_top);
+    println!("Stack top value: {:?}", pyobj);
 
     if let PyObjectStructure::Object {raw_data, .. } = &pyobj.structure {
         if let BuiltInTypeData::ClassInstance = &raw_data {
@@ -126,14 +126,16 @@ pub fn handle_load_attr(runtime: &Runtime, attr_name: &str) {
         None => {}
     }
     //second: try to load a method name
-    let pyobj = runtime.get_pyobj_byaddr(stack_top);
+
     let type_addr = pyobj.type_addr;
 
     let obj = runtime.get_method_addr_byname(type_addr, attr_name);
     match obj {
         None => {}
         Some(addr) => {
-            runtime.push_onto_stack(addr);
+            let bounded = curry_self(runtime, addr, stack_top);
+            runtime.increase_refcount(bounded);
+            runtime.push_onto_stack(bounded);
             return;
         }
     }
@@ -567,7 +569,7 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
-    //println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
+    println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
         Instruction::CallFunction { number_arguments } => handle_function_call(runtime, *number_arguments),
@@ -697,7 +699,9 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let obj = runtime.pop_stack();
             let value = runtime.pop_stack();
             let name = &code.code.names[*attr_name];
-            runtime.set_attribute(obj, name.clone(), value)
+            runtime.set_attribute(obj, name.clone(), value);
+            runtime.increase_refcount(obj);
+            runtime.increase_refcount(value);
         }
         Instruction::IndexAccess => {
             let index_value = runtime.pop_stack();
@@ -716,6 +720,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
         Instruction::ForIter(end_ptr) => {
             //TOS is the iterator object
             let iterator = runtime.top_stack();
+            //this assumes the iterator is on the top of the call already
             let next = runtime.call_method(iterator, "__next__", &[]);
 
             unimplemented!();
@@ -791,7 +796,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    //print_codeobj(&program.code_objects[0], None);
+    print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

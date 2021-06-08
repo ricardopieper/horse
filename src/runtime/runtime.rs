@@ -695,6 +695,7 @@ impl Runtime {
     pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
         let func_name = self.get_function_name(function_addr);
         let pyobj_func = self.try_load_function(function_addr);
+        println!("Function call to {:?}", func_name);
         match &pyobj_func.structure {
             PyObjectStructure::NativeCallable { code, name, is_bound } => {
                 if *is_bound {

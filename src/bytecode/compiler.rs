@@ -787,17 +787,11 @@ mod tests {
         let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
-            PyObjectStructure::NativeCallable {
-                code: _, name, is_bound
-            } => {
-                if name.as_ref().unwrap() == "lower" && *is_bound {
-                    Ok(())                   
-                } else {
-                    Err("Loaded an attribute with name != lower or not bound".into())
-                }
+            PyObjectStructure::BoundMethod { .. } => {
+                Ok(())                   
             },
             _ => {
-                Err("Did not load attribute, which should be a native function called lower (on a string)".into())
+                Err("Did not load attribute, which should be a bound method".into())
             }
         }
     }
