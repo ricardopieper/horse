@@ -52,6 +52,7 @@ impl<'a> CallParams<'a> {
 
 use std::cell::RefCell;
 
+#[derive(Debug)]
 pub struct StackFrame {
     pub function_name: String,
     pub local_namespace: Vec<MemoryAddress>, //the compiler knows which index will be loaded at compile time, so no need for a HashMap here.
@@ -411,8 +412,10 @@ impl Runtime {
             }
         } else if let PyObjectStructure::UserDefinedFunction { qualname, .. } = &mut pyobj.structure {
             return qualname.to_owned();
+        } else if let PyObjectStructure::Type {name, ..} = &mut pyobj.structure {
+            return name.clone();
         } else {
-            return "unknown".to_owned();
+            return "unknown".to_owned()
         }
     }
 
@@ -435,7 +438,7 @@ impl Runtime {
     pub fn decrease_refcount(&self, addr: MemoryAddress) {
         let pyobj = self.get_pyobj_byaddr_mut(addr);
         if let PyObjectStructure::Object { refcount, .. } = &mut pyobj.structure {
-            if *refcount > 0 {
+            if *refcount > 0 { //to prevent overflow, maybe this method shouldnt be called when intending to delete object
                 *refcount = *refcount - 1;
             }
 
@@ -669,19 +672,7 @@ impl Runtime {
 
 
     pub fn try_load_function(&self, addr: MemoryAddress) -> &PyObject {
-        let obj = self.get_pyobj_byaddr(addr);
-        match &obj.structure {
-            PyObjectStructure::NativeCallable { .. } => obj,
-            PyObjectStructure::UserDefinedFunction{ .. } => obj,
-            PyObjectStructure::BoundMethod {..} => obj,
-            PyObjectStructure::Type { name, functions, .. } => {
-                let new = functions
-                    .get("__new__")
-                    .expect(format!("Type {} has no __new__ function", name).as_str());
-                self.get_pyobj_byaddr(*new)
-            }
-            _ => panic!("not callable: {:?}", unsafe {&*addr}),
-        }
+        return self.get_pyobj_byaddr(self.try_load_function_addr(addr));
     }
 
     pub fn try_load_function_addr(&self, addr: MemoryAddress) -> MemoryAddress {
@@ -696,15 +687,14 @@ impl Runtime {
                     .expect(format!("Type {} has no __new__ function", name).as_str());
                 return *new;
             }
-            _ => panic!("not callable: {:?}", unsafe {&*addr}),
+            _ => panic!("not callable: {:?} {:?}", unsafe {&*addr}, self.stack.borrow()),
         }
     }
     
 
-    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> MemoryAddress {
+    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
         let func_name = self.get_function_name(function_addr);
         let pyobj_func = self.try_load_function(function_addr);
-    
         match &pyobj_func.structure {
             PyObjectStructure::NativeCallable { code, name, is_bound } => {
                 if *is_bound {
@@ -712,7 +702,7 @@ impl Runtime {
                         Some(x) => x,
                         None => self.pop_stack()
                     };
-                    println!("Bounded function: {:?}", unsafe { &*bounded});
+                    //println!("Bounded value: {:?}", unsafe { &*bounded});
                     temp_stack.push(bounded);
                 }
                 
@@ -726,7 +716,8 @@ impl Runtime {
                 
                 let result = (code.code)(self, call_params);
                 self.increase_refcount(result);
-                result
+                let popped_stacked_frame = self.pop_stack_frame();
+                (result, popped_stacked_frame)
             }
             PyObjectStructure::UserDefinedFunction {code, qualname} => {
                 let mut expected_number_args = code.code.params.len();
@@ -754,8 +745,10 @@ impl Runtime {
                 //what a mess
                 crate::bytecode::interpreter::execute_code_object(self, &code);
     
-                self.top_stack()
-    
+                let result_addr = self.top_stack();
+                self.increase_refcount(result_addr);
+                let popped_stacked_frame = self.pop_stack_frame();
+                (result_addr, popped_stacked_frame)
             }
             PyObjectStructure::BoundMethod {function_address, bound_address} => {
                 self.run_function(temp_stack, *function_address, Some(*bound_address))
@@ -766,26 +759,12 @@ impl Runtime {
         }
     }
 
-    pub fn callable_call(
-        &self,
-        callable_addr: MemoryAddress,
-        call_params: CallParams,
-    ) -> MemoryAddress {
-        let callable_pyobj = self.get_pyobj_byaddr(callable_addr);
-
-        if let PyObjectStructure::NativeCallable { code, .. } = &callable_pyobj.structure {
-            return (code.code)(self, call_params);
-        } else {
-            panic!("Object is not callable: {:?}", callable_pyobj);
-        }
-    }
-
     pub fn call_method(
         &self,
         bound_addr: MemoryAddress,
         method_name: &str,
         params: &[MemoryAddress],
-    ) -> Option<MemoryAddress> {
+    ) -> Option<(MemoryAddress, StackFrame)> {
         let pyobj = self.get_pyobj_byaddr(bound_addr);
         self.get_method_addr_byname(pyobj.type_addr, method_name)
             .map(move |method_addr| {
@@ -848,10 +827,6 @@ impl Runtime {
         return self.get_stack_offset(0);
     }
 
-    pub fn get_local_namespace(&self) -> Vec<MemoryAddress> {
-        return self.stack.borrow().last().unwrap().local_namespace.clone();
-    }
-
     pub fn push_onto_stack(&self, value: MemoryAddress) {
         //println!("Pushing onto stack: {:?}", unsafe{&*value});
         self.stack
@@ -862,13 +837,14 @@ impl Runtime {
             .push(value)
     }
 
-    pub fn pop_stack_frame(&self) {
+    pub fn pop_stack_frame(&self) -> StackFrame {
         let mut stack = self.stack.borrow_mut();
         match stack.pop() {
             Some(stack_frame) => {
                 for addr in stack_frame.stack.iter() {
                     self.decrease_refcount(*addr)
                 }
+                return stack_frame;
             }
             None => panic!("Attempt to pop on empty stack frames!"),
         }
@@ -954,7 +930,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__add__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
         assert_eq!(result_value, 4);
@@ -970,7 +946,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__add__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
         assert_eq!(result_value, 4);
@@ -987,7 +963,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__add__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
         assert_eq!(result_value, 4.5);
@@ -1004,7 +980,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__add__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
         assert_eq!(result_value, 4.5);
@@ -1022,7 +998,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__add__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
         assert_eq!(result_value, 4.5);
@@ -1040,7 +1016,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__mul__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
         assert_eq!(result_value, 6.0);
@@ -1056,7 +1032,7 @@ mod tests {
         //number1.__add__(number2)
         let result = interpreter
             .call_method(number1, "__mul__", &[number2])
-            .unwrap();
+            .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
         assert_eq!(result_value, 6);

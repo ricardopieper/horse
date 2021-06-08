@@ -7,7 +7,7 @@ fn create_print_fn(runtime: &Runtime) -> MemoryAddress {
         code: Box::new(move |runtime, params| -> MemoryAddress {
             let call_params = params.as_function();
             check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
-            let str_call_result = runtime
+            let (str_call_result, _) = runtime
                 .call_method(call_params.params[0], "__str__", &[])
                 .unwrap();
             let str_raw = runtime.get_raw_data_of_pyobj(str_call_result);
@@ -50,7 +50,7 @@ fn create_len_fn(runtime: &Runtime) -> MemoryAddress {
         code: Box::new(move |runtime, params| -> MemoryAddress {
             let call_params = params.as_function();
             check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
-            let str_call_result = runtime
+            let (str_call_result, _) = runtime
                 .call_method(call_params.params[0], "__len__", &[])
                 .unwrap();
             return str_call_result;
@@ -64,7 +64,7 @@ fn create_panic_fn(runtime: &Runtime) -> MemoryAddress {
         code: Box::new(move |runtime, params| -> MemoryAddress {
             let call_params = params.as_function();
             check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
-            let str_call_result = runtime
+            let (str_call_result, _) = runtime
                 .call_method(call_params.params[0], "__str__", &[])
                 .unwrap();
             let str_raw = runtime.get_raw_data_of_pyobj(str_call_result);

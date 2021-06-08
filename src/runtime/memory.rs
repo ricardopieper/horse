@@ -201,7 +201,7 @@ impl UnsafeMemory {
 
     pub fn check_mem(&self, address: MemoryAddress) {
         if self.recently_deallocated_addr.borrow().contains(&address) {
-            panic!("Trying to get recently deallocated memory {:p}", address)
+            panic!("Trying to get recently deallocated memory {:p} {:?}", address, unsafe{ &*address})
         }
     }
 

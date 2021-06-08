@@ -86,7 +86,7 @@ fn equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
                     }
                     let result = runtime.call_method(*ptr_self, "__eq__", &[*ptr_other]);
                     match result {
-                        Some(eq_result) => {
+                        Some((eq_result, _)) => {
                             if eq_result == runtime.builtin_type_addrs.false_val {
                                 list_equals = false;
                                 break;
@@ -115,7 +115,7 @@ fn not_equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
     let result = runtime.call_method(call_params.bound_pyobj, "__eq__", &[call_params.params[0]]);
     match result {
-        Some(eq_result) => {
+        Some((eq_result, _)) => {
             if eq_result == runtime.builtin_type_addrs.false_val {
                 return runtime.builtin_type_addrs.true_val;
             } else {
@@ -139,7 +139,7 @@ fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let all_reprs: Vec<String> = this_list
         .iter()
         .map(|ptr_self| {
-            let as_string = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
+            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
             return runtime
                 .get_pyobj_byaddr(as_string)
                 .try_get_builtin()
@@ -169,7 +169,7 @@ fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let all_reprs: Vec<String> = this_list
         .iter()
         .map(|ptr_self| {
-            let as_string = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
+            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
             return runtime
                 .get_raw_data_of_pyobj(as_string)
                 .take_string()
@@ -207,11 +207,7 @@ fn iter(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     //find it in builtin module
     let iterator_class = runtime.find_in_module(MAIN_MODULE, "list_iterator").unwrap();
     let new = runtime.try_load_function_addr(iterator_class); //this is the __new__ method, try_load_function_addr automatically gets the __new__ function
-    let result = runtime.run_function(&mut vec![call_params.bound_pyobj], new, None);
-    //@TODO: Callers of run_function today have to call the pop_stack_frame() method, because
-    //some of them want to observe the modifications to the local namespace caused by the call (ex: class definitions)
-    //maybe there could be a better way to do it
-    runtime.pop_stack_frame();
+    let (result, _) = runtime.run_function(&mut vec![call_params.bound_pyobj], new, None);
     return result;
 }
 

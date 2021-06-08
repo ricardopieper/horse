@@ -112,7 +112,7 @@ fn create_new(runtime: &Runtime, params: CallParams) -> MemoryAddress {
         //try call the __str__ method on the parameter
         let string_call = runtime.call_method(params.params[0], "__str__", &[]);
         match string_call {
-            Some(addr) => addr,
+            Some((addr, _)) => addr,
             None => panic!("Object passed to str does not have __str__ method"),
         }
     }

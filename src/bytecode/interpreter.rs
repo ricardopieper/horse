@@ -19,7 +19,7 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
         runtime.increase_refcount(*addr);
     }
 
-    let returned_value = runtime.run_function(&mut temp_stack, function_addr, None);
+    let (returned_value, _) = runtime.run_function(&mut temp_stack, function_addr, None);
 
     //increase refcount so it survives the pop_stack_frame call. Returned value should have 
     let refcount = runtime.get_refcount(returned_value);
@@ -32,8 +32,6 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
     for addr in temp_stack.iter() {
         runtime.decrease_refcount(*addr);
     }
-
-    runtime.pop_stack_frame();
 
     runtime.push_onto_stack(returned_value);
 }
@@ -534,7 +532,7 @@ pub fn handle_jump_if_false_pop(runtime: &Runtime, destination: usize) -> bool {
         runtime.decrease_refcount(stack_top);
         return result;
     } else {
-        let as_boolean = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
+        let (as_boolean, _) = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
         let raw_value = runtime.get_raw_data_of_pyobj(as_boolean).take_int();
         let result = if raw_value == 0 {
             runtime.set_pc(destination);
@@ -569,7 +567,7 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
-    //println!(">> {:?} at {:?}", instruction, code.code.objname);
+    //println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
         Instruction::CallFunction { number_arguments } => handle_function_call(runtime, *number_arguments),
@@ -618,26 +616,27 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let class_code = runtime.get_pyobj_byaddr(codeobj_addr).try_get_builtin().unwrap().take_code_object().clone();
                     
             runtime.new_stack_frame(class_name.clone());
+            
             //execute the class code
             execute_code_object(runtime, &class_code);
+
+            let popped_stack_frame = runtime.pop_stack_frame();
 
             let mut namespace = std::collections::HashMap::<String, MemoryAddress>::new();
             
             //and observe what changed in the current stack frame namespace 
-            let namespace_values = runtime.get_local_namespace();
+            let namespace_values = popped_stack_frame.local_namespace;
             for (index, name) in class_code.code.names.iter().enumerate() {
                 //Insert the value as-is in the namespace
                 namespace.insert(name.clone(), namespace_values[index]);
             }
-
-            runtime.pop_stack_frame();
 
             let type_addr = runtime.create_type(MAIN_MODULE, &class_name.clone(), None);
 
             //Registers the regular functions on the type, even those that take the self parameter
             //They will be accessed using `ClassName.function_name`
             for (key, value) in namespace.iter() {
-                println!("Registering method addr {} on type {}", key, class_name);
+                //println!("Registering method addr {} on type {}", key, class_name);
                 runtime.register_method_addr_on_type(type_addr, key, *value);
             }
 
@@ -725,6 +724,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             panic!("Unsupported instruction: {:?}", instruction);
         }
     }
+    //println!(">> {:?} Executed", runtime.get_pc());
     if advance_pc {
         runtime.jump_pc(1);
     }
@@ -791,7 +791,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    print_codeobj(&program.code_objects[0], None);
+    //print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);

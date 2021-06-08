@@ -60,7 +60,7 @@ fn main() {
                 let result_string = runtime.call_method(result_addr, "__repr__", &[]);
                 match result_string {
                     None => {}
-                    Some(addr) => {
+                    Some((addr, _)) => {
                         let pyobj_str = runtime.get_raw_data_of_pyobj(addr).take_string();
                         println!("{}", pyobj_str);
                     }
