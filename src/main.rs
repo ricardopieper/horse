@@ -33,7 +33,7 @@ fn main() {
     }
 
     println!(
-        "Slowpython 0.0.1 (rustc {})",
+        "horse 0.0.1 (rustc {})",
         rustc_version_runtime::version()
     );
     println!("No help, copyright or licensing commands available. You're on your own.");

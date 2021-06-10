@@ -48,7 +48,7 @@ fn extend(runtime: &Runtime, params: CallParams) -> MemoryAddress {
         _ => {
             let other_type_name = runtime.get_pyobj_type_name(call_params.params[0]);
             panic!(
-                "slowpython only supports extending from list (not \"{}\") for now",
+                "horse only supports extending from list (not \"{}\") for now",
                 other_type_name
             );
         }

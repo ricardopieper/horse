@@ -1,5 +1,5 @@
 [package]
-name = "slowpython"
+name = "horse"
 version = "0.1.0"
 authors = ["Ricardo Pieper <ricardopieper@live.com>"]
 edition = "2018"

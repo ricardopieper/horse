@@ -1,4 +1,4 @@
-slowpython
+horse
 ==========
 
 This is a toy implementation of Python in Rust.
@@ -37,7 +37,7 @@ Architecture
 This project implements the usual lexer -> parser -> interpreter architecture. However, it currently
 also implements a bytecode and bytecode interpreter instead of executing the AST directly (tree).
 
-A small compiler produces the slowpython bytecode in `bytecode/compiler.rs`. This could possibly be serialized and run. 
+A small compiler produces the horse bytecode in `bytecode/compiler.rs`. This could possibly be serialized and run. 
 The interpreter runtime in `runtime.rs` implements the data model, function calls, modules and such. This is not JIT-compiled to x86, 
 it is interpreted right away.
 
