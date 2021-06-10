@@ -459,9 +459,6 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                     let offset_after_else =
                         offset_after_true_branch + false_branch_compiled.instructions.len();
 
-                    println!("false branch: {:?}", false_branch_compiled.instructions);
-                    
-
                     all_instructions.push(Instruction::JumpUnconditional(offset_after_else));
                     all_instructions.append(&mut false_branch_compiled.instructions);
                 } else {
@@ -663,7 +660,6 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("1 + 3.5").unwrap();
         let expr = parse_ast(tokens);
-        println!("AST: {:?}", expr);
         let program = compile_repl(expr);
         println!("program: {:?}", program.code_objects);
         interpreter::execute_program(&mut runtime, program);

@@ -1074,6 +1074,7 @@ impl Parser {
                             let member_access_expr =
                                 Expr::MemberAccess(Box::new(cur_expr), name.to_string());
                             self.push_operand(member_access_expr);
+                            was_operand = true;
                         } else {
                             return Err(ParsingError::ExprError(
                                 "Failed parsing member acessor".into(),
@@ -1117,8 +1118,12 @@ impl Parser {
                 break;
             } else {
                 self.next();
+                if self.can_go() {
+                    if Token::MemberAccessor == self.cur().clone() {
+                        continue;
+                    }
+                }
             }
-
             if was_operand {
                 //base case: there is only an operator and an operand, like "-1"
                 if self.operand_stack().len() == 1 && self.operator_stack().len() == 1 {
@@ -2688,6 +2693,27 @@ print(y)",
             path: vec!["obj".into(), "prop".into()],
             expression: Expr::IntegerValue(1),
         }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn member_compare() {
+        let tokens = tokenize("self.current >= self.max").unwrap();
+        println!("{:?}", tokens);
+        let result = parse_ast(tokens);
+        let expected = vec![AST::StandaloneExpr(
+            Expr::BinaryOperation(
+                Box::new(Expr::MemberAccess(
+                    Box::new(Expr::Variable("self".into())),
+                    "current".into(),
+                )),
+                Operator::GreaterEquals,
+                Box::new(Expr::MemberAccess(
+                    Box::new(Expr::Variable("self".into())),
+                    "max".into(),
+                ))
+            )    
+        )];
         assert_eq!(expected, result);
     }
 

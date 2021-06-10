@@ -672,7 +672,7 @@ impl Runtime {
         function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
         let func_name = self.get_function_name(function_addr);
         let pyobj_func = self.try_load_function(function_addr);
-        println!("Calling function {:?}", func_name);
+        //println!("Calling function {:?}", func_name);
         match &pyobj_func.structure {
             PyObjectStructure::NativeCallable { code, name, is_bound } => {
                 if *is_bound {
@@ -755,13 +755,7 @@ impl Runtime {
         let top_stack_frame = stack.last_mut().unwrap();
         top_stack_frame.exception = Some(exception_value_addr)
     }
-
-    pub fn get_current_exception(&self) -> Option<MemoryAddress> {
-        let mut stack = self.stack.borrow_mut();
-        let top_stack_frame = stack.last_mut().unwrap();
-        top_stack_frame.exception.clone()
-    }
-
+    
     pub fn new_stack_frame(&self, function_name: String) {
         self.stack.borrow_mut().push(StackFrame {
             function_name: function_name,

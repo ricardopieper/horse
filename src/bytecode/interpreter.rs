@@ -587,7 +587,7 @@ pub fn handle_jump_unconditional(runtime: &Runtime, destination: usize) {
 pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
-    println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
+    //println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
     //runtime.print_stack();
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
@@ -738,6 +738,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
         Instruction::ForIter(end_ptr) => {
             //TOS is the iterator object
             let iterator = runtime.top_stack();
+
             //this assumes the iterator is on the top of the call already
             let (next, popped_frame) = runtime.call_method(iterator, "__next__", &[]).unwrap();
             
@@ -822,7 +823,7 @@ fn print_codeobj(codeobj: &CodeObject, codeobj_name: Option<String>) {
 }
 
 pub fn execute_program(runtime: &mut Runtime, program: Program) {
-    print_codeobj(&program.code_objects[0], None);
+    //print_codeobj(&program.code_objects[0], None);
 
     let main_code = program.code_objects.iter().find(|x| x.main).unwrap();
     let main_codeobj_ctx = register_codeobj_consts(runtime, main_code);
