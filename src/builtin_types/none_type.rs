@@ -3,7 +3,7 @@ use crate::runtime::runtime::*;
 use crate::runtime::datamodel::*;
 use crate::runtime::memory::*;
 fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
-    check_builtin_func_params!(params.func_name.unwrap(), 0, params.params.len());
+    check_builtin_func_params!(params.func_name.unwrap(), 1, params.params.len());
  
     runtime.allocate_type_byaddr_raw(
         runtime.builtin_type_addrs.string,

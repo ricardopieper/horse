@@ -93,7 +93,7 @@ pub fn handle_load_attr(runtime: &Runtime, attr_name: &str) {
     //which will be a bounded function to the stack_top value
     //i.e. it will be passed to the function as the "self" parameter 
     let pyobj = runtime.get_pyobj_byaddr(stack_top);
-    println!("Stack top value: {:?}", pyobj);
+    //println!("Stack top value: {:?}", pyobj);
 
     if let PyObjectStructure::Object {raw_data, .. } = &pyobj.structure {
         if let BuiltInTypeData::ClassInstance = &raw_data {
@@ -152,12 +152,14 @@ pub fn handle_load_attr(runtime: &Runtime, attr_name: &str) {
 }
 
 pub fn handle_load_global(runtime: &Runtime, code_obj: &CodeObjectContext, name: usize) {
+    /*
     if let Some(addr) = runtime.builtin_names.get(name).map(|addr| *addr) {
         if addr != *runtime.special_values.get(&SpecialValue::NoneValue).unwrap() {
             runtime.push_onto_stack(addr); 
             return;
         }
     }
+    */
 
     if let Some(name_str) = code_obj.code.names.get(name) {
         if let Some(addr) = runtime.find_in_module(BUILTIN_MODULE, name_str) {
@@ -397,9 +399,9 @@ create_binary_operator!(handle_binary_sub, a, b, a - b, "__sub__");
 create_binary_operator!(handle_binary_mul, a, b, a * b, "__mul__");
 
 create_compare_operator!(handle_compare_greater, a, b, a > b, "__gt__");
-create_compare_operator!(handle_compare_greater_eq, a, b, a > b, "__ge__");
+create_compare_operator!(handle_compare_greater_eq, a, b, a >= b, "__ge__");
 create_compare_operator!(handle_compare_less, a, b, a < b, "__lt__");
-create_compare_operator!(handle_compare_less_eq, a, b, a > b, "__le__");
+create_compare_operator!(handle_compare_less_eq, a, b, a <= b, "__le__");
 create_compare_operator!(handle_compare_equals, a, b, a == b, "__eq__");
 create_compare_operator!(handle_compare_not_eq, a, b, a != b, "__ne__");
 
@@ -491,7 +493,7 @@ fn handle_binary_truediv(runtime: &Runtime) {
 }
 
 pub fn handle_load_name(runtime: &Runtime, code_obj: &CodeObjectContext, name: usize) {
-    match runtime.get_local(name) {
+    /*match runtime.get_local(name) {
         Some(addr) => runtime.push_onto_stack(addr),
         None => match runtime.builtin_names.get(name).map(|addr| *addr) {
             Some(addr) => runtime.push_onto_stack(addr),
@@ -507,7 +509,23 @@ pub fn handle_load_name(runtime: &Runtime, code_obj: &CodeObjectContext, name: u
                 None => panic!("Could not find name")
             },
         }
+    }*/
+
+    match runtime.get_local(name) {
+        Some(addr) => runtime.push_onto_stack(addr),
+        None => match code_obj.code.names.get(name) {
+            //@TODO shouldn't it load from the main module first? Or even better, the current module being executed?
+            Some(name_str) => match runtime.find_in_module(BUILTIN_MODULE, name_str) {
+                Some(addr) => runtime.push_onto_stack(addr),
+                None => match runtime.find_in_module(MAIN_MODULE, name_str) {
+                    Some(addr) => runtime.push_onto_stack(addr),
+                    None => panic!("Could not find name {}", name_str),
+                }
+            },
+            None => panic!("Could not find name")
+        },
     }
+    
 }
 
 pub fn handle_store_name(runtime: &Runtime, name: usize) {
@@ -570,6 +588,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(runtime.get_pc()).unwrap();
     println!(">> {:?} {:?} at {:?}", runtime.get_pc(), instruction, code.code.objname);
+    //runtime.print_stack();
     match instruction {
         Instruction::LoadConst(c) => handle_load_const(runtime, code, *c),
         Instruction::CallFunction { number_arguments } => handle_function_call(runtime, *number_arguments),
@@ -683,10 +702,9 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             //  });
 
             runtime.push_onto_stack(type_addr);
-
-
-                
-            
+        }
+        Instruction::PopTop => {
+            runtime.pop_stack();
         }
         Instruction::ReturnValue => {
             let top = runtime.top_stack();
@@ -721,9 +739,17 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             //TOS is the iterator object
             let iterator = runtime.top_stack();
             //this assumes the iterator is on the top of the call already
-            let next = runtime.call_method(iterator, "__next__", &[]);
+            let (next, popped_frame) = runtime.call_method(iterator, "__next__", &[]).unwrap();
+            
+            if let Some(exception_addr) = popped_frame.exception {
+                if exception_addr == runtime.special_values[&SpecialValue::StopIterationType] {
+                    runtime.set_pc(*end_ptr);
+                }
+            } else {
+                runtime.push_onto_stack(next);   
+            }
 
-            unimplemented!();
+            //unimplemented!();
         }
         _ => {
             panic!("Unsupported instruction: {:?}", instruction);

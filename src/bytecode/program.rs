@@ -24,6 +24,7 @@ pub enum Instruction {
     JumpIfFalseAndPopStack(usize),
     JumpUnconditional(usize),
     ReturnValue,
+    PopTop,
     BinaryAdd,
     BinaryModulus,
     BinarySubtract,

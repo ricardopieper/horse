@@ -52,14 +52,6 @@ impl<'a> CallParams<'a> {
 
 use std::cell::RefCell;
 
-#[derive(Debug)]
-pub struct StackFrame {
-    pub function_name: String,
-    pub local_namespace: Vec<MemoryAddress>, //the compiler knows which index will be loaded at compile time, so no need for a HashMap here.
-    pub stack: Vec<MemoryAddress>,
-    pub exception: Option<MemoryAddress>,
-    pub prog_counter: Cell<usize>,
-}
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum SpecialValue {
@@ -86,13 +78,22 @@ pub struct BuiltinTypeAddresses {
     pub false_val: MemoryAddress,
 }
 
+#[derive(Debug)]
+pub struct StackFrame {
+    pub function_name: String,
+    pub local_namespace: Vec<MemoryAddress>, //the compiler knows which index will be loaded at compile time, so no need for a HashMap here.
+    pub stack: Vec<MemoryAddress>,
+    pub exception: Option<MemoryAddress>,
+    pub prog_counter: Cell<usize>,
+}
+
 pub struct Runtime {
     pub stack: RefCell<Vec<StackFrame>>,
     pub memory: UnsafeMemory,
     pub builtin_type_addrs: BuiltinTypeAddresses,
     pub special_values: HashMap<SpecialValue, MemoryAddress>,
     pub modules: HashMap<String, MemoryAddress>,
-    pub builtin_names: Vec<MemoryAddress>,
+    //pub builtin_names: Vec<MemoryAddress>,
 }
 
 impl Runtime {
@@ -110,7 +111,7 @@ impl Runtime {
             memory: memory,
             special_values: HashMap::new(),
             modules: HashMap::new(),
-            builtin_names: vec![],
+            //builtin_names: vec![],
             builtin_type_addrs: BuiltinTypeAddresses {
                 int: nullptr,
                 float: nullptr,
@@ -123,7 +124,6 @@ impl Runtime {
                 code_object: nullptr,
             },
         };
-
         let type_type = interpreter.allocate_and_write(PyObject {
             type_addr: nullptr,
             properties: HashMap::new(),
@@ -135,70 +135,8 @@ impl Runtime {
             is_const: false,
         });
 
-        let none_type = interpreter.allocate_and_write(PyObject {
-            type_addr: type_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::Type {
-                name: String::from("NoneType"),
-                functions: HashMap::new(),
-                supertype: None,
-            },
-            is_const: false,
-        });
-
-        let none_value = interpreter.allocate_and_write(PyObject {
-            type_addr: none_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::None,
-            is_const: false,
-        });
-
-        let not_implemented_type = interpreter.allocate_and_write(PyObject {
-            type_addr: type_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::Type {
-                name: String::from("NotImplemented"),
-                functions: HashMap::new(),
-                supertype: None,
-            },
-            is_const: false,
-        });
-
-        let not_implemented_value = interpreter.allocate_and_write(PyObject {
-            type_addr: not_implemented_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::NotImplemented,
-            is_const: false,
-        });
-
-        let stop_iteration_type = interpreter.allocate_and_write(PyObject {
-            type_addr: type_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::Type {
-                name: String::from("StopIteration"),
-                functions: HashMap::new(),
-                supertype: None,
-            },
-            is_const: false,
-        });
-
-        let stop_iteration_value = interpreter.allocate_and_write(PyObject {
-            type_addr: stop_iteration_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::NotImplemented,
-            is_const: false,
-        });
-
-        let callable_type = interpreter.allocate_and_write(PyObject {
-            type_addr: type_type,
-            properties: HashMap::new(),
-            structure: PyObjectStructure::Type {
-                name: String::from("function"),
-                functions: HashMap::new(),
-                supertype: None,
-            },
-            is_const: false,
-        });
+        interpreter.make_const(type_type);
+        interpreter.special_values.insert(SpecialValue::Type, type_type);
 
         let module_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
@@ -231,7 +169,56 @@ impl Runtime {
             is_const: false,
         });
 
-        interpreter.make_const(type_type);
+       
+        interpreter
+            .modules
+            .insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
+
+        interpreter
+            .modules
+            .insert(MAIN_MODULE.to_string(), main_module_obj);
+
+        
+        let none_type = interpreter.create_type(BUILTIN_MODULE, "None", None);
+
+
+        let none_value = interpreter.allocate_and_write(PyObject {
+            type_addr: none_type,
+            properties: HashMap::new(),
+            structure: PyObjectStructure::None,
+            is_const: false,
+        });
+
+        let not_implemented_type = interpreter.create_type(BUILTIN_MODULE, "NotImplemented", None);
+
+        let not_implemented_value = interpreter.allocate_and_write(PyObject {
+            type_addr: not_implemented_type,
+            properties: HashMap::new(),
+            structure: PyObjectStructure::NotImplemented,
+            is_const: false,
+        });
+
+        let stop_iteration_type = interpreter.create_type(BUILTIN_MODULE, "StopIteration", Some(type_type));
+
+        let stop_iteration_value = interpreter.allocate_and_write(PyObject {
+            type_addr: stop_iteration_type,
+            properties: HashMap::new(),
+            structure: PyObjectStructure::NotImplemented,
+            is_const: false,
+        });
+
+        let callable_type = interpreter.allocate_and_write(PyObject {
+            type_addr: type_type,
+            properties: HashMap::new(),
+            structure: PyObjectStructure::Type {
+                name: String::from("function"),
+                functions: HashMap::new(),
+                supertype: None,
+            },
+            is_const: false,
+        });
+
+
         interpreter.make_const(none_type);
         interpreter.make_const(none_value);
         interpreter.make_const(not_implemented_type);
@@ -242,9 +229,6 @@ impl Runtime {
         interpreter.make_const(module_type);
         interpreter.make_const(main_module_obj);
 
-        interpreter
-            .special_values
-            .insert(SpecialValue::Type, type_type);
         interpreter
             .special_values
             .insert(SpecialValue::NoneType, none_type);
@@ -269,14 +253,6 @@ impl Runtime {
         interpreter
             .special_values
             .insert(SpecialValue::ModuleType, module_type);
-
-        interpreter
-            .modules
-            .insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
-
-        interpreter
-            .modules
-            .insert(MAIN_MODULE.to_string(), main_module_obj);
 
         return interpreter;
     }
@@ -692,10 +668,11 @@ impl Runtime {
     }
     
 
-    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
+    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, 
+        function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
         let func_name = self.get_function_name(function_addr);
         let pyobj_func = self.try_load_function(function_addr);
-        println!("Function call to {:?}", func_name);
+        println!("Calling function {:?}", func_name);
         match &pyobj_func.structure {
             PyObjectStructure::NativeCallable { code, name, is_bound } => {
                 if *is_bound {
@@ -777,6 +754,12 @@ impl Runtime {
         let mut stack = self.stack.borrow_mut();
         let top_stack_frame = stack.last_mut().unwrap();
         top_stack_frame.exception = Some(exception_value_addr)
+    }
+
+    pub fn get_current_exception(&self) -> Option<MemoryAddress> {
+        let mut stack = self.stack.borrow_mut();
+        let top_stack_frame = stack.last_mut().unwrap();
+        top_stack_frame.exception.clone()
     }
 
     pub fn new_stack_frame(&self, function_name: String) {

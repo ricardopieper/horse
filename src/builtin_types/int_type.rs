@@ -165,7 +165,7 @@ fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
 
 fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let call_params = params.as_method();
-    check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
+    check_builtin_func_params!(params.func_name.unwrap(), 0, call_params.params.len());
     let self_data = runtime
         .get_raw_data_of_pyobj(call_params.bound_pyobj)
         .take_int();

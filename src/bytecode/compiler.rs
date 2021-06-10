@@ -231,6 +231,21 @@ pub fn resolve_loads_stores(code: &mut CodeObject) {
     code.names = indices_names;
 }
 
+pub fn compile_repl(ast: Vec<AST>) -> Program {
+
+    let mut compiled = compile(ast);
+    println!("{:?}", compiled.code_objects);
+    let instructions = &mut compiled.code_objects.last_mut().unwrap().instructions;
+
+    let last_pop_location = instructions.len() - 3;
+
+    if let Instruction::PopTop = instructions[last_pop_location] {
+        instructions.remove(last_pop_location);
+        compiled.code_objects.last_mut().unwrap().instructions.pop();
+    }
+    return compiled;
+}
+
 pub fn compile(ast: Vec<AST>) -> Program {
 
     let mut all_results = vec![];
@@ -301,6 +316,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
             }
             AST::StandaloneExpr(expr) => {
                 all_instructions.append(&mut compile_expr(&expr, const_map));
+                all_instructions.push(Instruction::PopTop);
             },
             AST::Return(Some(expr)) => {
                 all_instructions.append(&mut compile_expr(&expr, const_map));
@@ -441,7 +457,11 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                     //+1 because there will be an instruction
                     //in the true branch that will jump to *after* the false branch
                     let offset_after_else =
-                        offset_after_true_branch + false_branch_compiled.instructions.len() + 1;
+                        offset_after_true_branch + false_branch_compiled.instructions.len();
+
+                    println!("false branch: {:?}", false_branch_compiled.instructions);
+                    
+
                     all_instructions.push(Instruction::JumpUnconditional(offset_after_else));
                     all_instructions.append(&mut false_branch_compiled.instructions);
                 } else {
@@ -480,6 +500,12 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let mut if_expr_compiled = compile_expr(&expr, const_map);
                 all_instructions.append(&mut if_expr_compiled);
                 all_instructions.push(Instruction::Raise);
+                if !const_map.contains_key(&Const::None) {
+                    const_map.insert(Const::None, const_map.len());
+                }
+                //println!("{:#?}", new_const_map);
+                all_instructions.push(Instruction::LoadConst(const_map[&Const::None]));
+                all_instructions.push(Instruction::ReturnValue);
             }
             AST::Break => {
                 //In python there's something called a "block stack" and an opcode called POP_BLOCK
@@ -527,7 +553,6 @@ fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTre
         match code_obj.instructions.last().unwrap() {
             Instruction::ReturnValue => { /*unchanged*/ },
             _ => {
-                //@TODO redo this
                 if !const_map.contains_key(&Const::None) {
                     const_map.insert(Const::None, const_map.len());
                     code_obj.consts.push(Const::None);
@@ -558,8 +583,7 @@ mod tests {
             let mut runtime = Runtime::new();
             register_builtins(&mut runtime);
             loader::run_loader(&mut runtime);
-            let tokens = tokenize(&source.unwrap())
-            .unwrap();
+            let tokens = tokenize(&source.unwrap()).unwrap();
             let expr = parse_ast(tokens);
             let program = compile(expr);
             interpreter::execute_program(&mut runtime, program);
@@ -574,7 +598,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("1").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
@@ -587,7 +611,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("1.0").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -600,7 +624,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("True").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
@@ -613,7 +637,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("False").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
@@ -626,7 +650,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("1 + 1").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
@@ -640,7 +664,8 @@ mod tests {
         let tokens = tokenize("1 + 3.5").unwrap();
         let expr = parse_ast(tokens);
         println!("AST: {:?}", expr);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
+        println!("program: {:?}", program.code_objects);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -655,7 +680,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("-(5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -670,7 +695,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("-(5.0 / 9.0) * 32.0").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -685,7 +710,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("1.0 - (5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -699,7 +724,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("(-(5.0 / 9.0) * 32.0) / (1.0 - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -715,7 +740,7 @@ mod tests {
         let tokens =
             tokenize("cos(sin(-(5.0 / 9.0) * 32.0)) / tanh(cos(1.0) - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -729,7 +754,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("sin(1.0)").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_pop = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
@@ -742,7 +767,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("x = 1 + 2").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let x = runtime.get_local(0).unwrap();
         let stack_value = runtime.get_raw_data_of_pyobj(x).take_int();
@@ -755,7 +780,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("\"abc\" + 'cde'").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_string();
@@ -768,7 +793,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("True and False").unwrap();
         let expr = parse_ast(tokens);
-        let program = compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
@@ -782,7 +807,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("\"abc\".lower").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program =  compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
@@ -802,7 +827,7 @@ mod tests {
         register_builtins(&mut runtime);
         let tokens = tokenize("__builtins__.float").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         let stack_top = runtime.get_stack_offset(-1);
         let stack_value = runtime.get_pyobj_byaddr(stack_top);
@@ -833,7 +858,7 @@ class SomeClass:
         self.x = 1
 ").unwrap();
         let expr = parse_ast(tokens);
-        let program =  compile(expr);
+        let program = compile_repl(expr);
         interpreter::execute_program(&mut runtime, program);
         Ok(())
     }

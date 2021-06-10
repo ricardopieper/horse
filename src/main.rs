@@ -54,9 +54,9 @@ fn main() {
                 }
                 let tokens = lexer::tokenize(input.as_str());
                 let ast = parser::parse_ast(tokens.unwrap());
-                let program = bytecode::compiler::compile(ast);
+                let program = bytecode::compiler::compile_repl(ast);
                 bytecode::interpreter::execute_program(&mut runtime, program);
-                let result_addr = runtime.top_stack();
+                let result_addr = runtime.get_stack_offset(-1);
                 let result_string = runtime.call_method(result_addr, "__repr__", &[]);
                 match result_string {
                     None => {}

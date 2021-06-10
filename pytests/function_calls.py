@@ -15,7 +15,6 @@ while current < 1000:
     val = val + weird_logic(current)
     sum = sum + val
     current = current + 1
-    printstack()
 
 assert_eq(3998000, sum)
 assert_eq(1000, current)
