@@ -55,7 +55,7 @@ fn main() {
                 let program = bytecode::compiler::compile_repl(ast);
                 bytecode::interpreter::execute_program(&mut runtime, program);
                 let result_addr = runtime.get_stack_offset(-1);
-                let result_string = runtime.call_method(result_addr, "__repr__", &[]);
+                let result_string = runtime.call_method(result_addr, "__repr__", runtime::runtime::PositionalParameters::empty());
                 match result_string {
                     None => {}
                     Some((addr, _)) => {

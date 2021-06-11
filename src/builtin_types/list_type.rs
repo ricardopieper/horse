@@ -84,7 +84,7 @@ fn equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
                     if ptr_self == ptr_other {
                         continue;
                     }
-                    let result = runtime.call_method(*ptr_self, "__eq__", &[*ptr_other]);
+                    let result = runtime.call_method(*ptr_self, "__eq__", PositionalParameters::single(*ptr_other));
                     match result {
                         Some((eq_result, _)) => {
                             if eq_result == runtime.builtin_type_addrs.false_val {
@@ -113,7 +113,7 @@ fn equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
 fn not_equals(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let call_params = params.as_method();
     check_builtin_func_params!(params.func_name.unwrap(), 1, call_params.params.len());
-    let result = runtime.call_method(call_params.bound_pyobj, "__eq__", &[call_params.params[0]]);
+    let result = runtime.call_method(call_params.bound_pyobj, "__eq__", PositionalParameters::single(call_params.params[0]));
     match result {
         Some((eq_result, _)) => {
             if eq_result == runtime.builtin_type_addrs.false_val {
@@ -139,7 +139,7 @@ fn repr(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let all_reprs: Vec<String> = this_list
         .iter()
         .map(|ptr_self| {
-            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
+            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", PositionalParameters::empty()).unwrap();
             return runtime
                 .get_pyobj_byaddr(as_string)
                 .try_get_builtin()
@@ -169,7 +169,7 @@ fn to_str(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     let all_reprs: Vec<String> = this_list
         .iter()
         .map(|ptr_self| {
-            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", &[]).unwrap();
+            let (as_string, _) = runtime.call_method(*ptr_self, "__repr__", PositionalParameters::empty()).unwrap();
             return runtime
                 .get_raw_data_of_pyobj(as_string)
                 .take_string()
@@ -205,9 +205,9 @@ fn iter(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     check_builtin_func_params!(params.func_name.unwrap(), 0, call_params.params.len());
     //construct a list_iterator
     //find it in builtin module
-    let iterator_class = runtime.find_in_module(MAIN_MODULE, "list_iterator").unwrap();
+    let iterator_class = runtime.find_in_module(MAIN_MODULE, "list_iterator").expect("list_iterator type not found");
     let new = runtime.try_load_function_addr(iterator_class); //this is the __new__ method, try_load_function_addr automatically gets the __new__ function
-    let (result, _) = runtime.run_function(&mut vec![call_params.bound_pyobj], new, None);
+    let (result, _) = runtime.run_function(PositionalParameters::single(call_params.bound_pyobj), new, None);
     return result;
 }
 

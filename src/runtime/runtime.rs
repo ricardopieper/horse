@@ -16,10 +16,48 @@ impl std::fmt::Debug for PyCallable {
     }
 }
 
+#[derive(Clone)]
+pub struct PositionalParameters {
+    pub params: Vec<MemoryAddress>,
+}
+
+impl<'a> Into<PositionalParameters> for &'a[MemoryAddress] {
+    
+    fn into(self) -> PositionalParameters { 
+        PositionalParameters::from_stack_popped(self.to_vec())    
+    }
+}
+
+impl PositionalParameters {
+    pub fn from_stack_popped(params: Vec<MemoryAddress>) -> PositionalParameters {
+        let mut reversed = params;
+        reversed.reverse();
+        PositionalParameters {
+            params: reversed
+        }
+    }
+
+    pub fn empty() -> PositionalParameters {
+        PositionalParameters {
+            params: vec![]
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.params.len()
+    }
+
+    pub fn single(addr: MemoryAddress) -> PositionalParameters {
+        PositionalParameters {
+            params: vec![addr]
+        }
+    }
+}
+
 pub struct CallParams<'a> {
     pub func_address: MemoryAddress,
     pub func_name: Option<&'a str>,
-    pub params: &'a [MemoryAddress],
+    pub params: PositionalParameters,
 }
 
 pub struct FunctionCallParams {
@@ -34,8 +72,8 @@ pub struct MethodCallParams {
 
 impl<'a> CallParams<'a> {
     pub fn as_method(&self) -> MethodCallParams {
-        let bound = self.params[0];
-        let rest: Vec<MemoryAddress> = self.params.iter().skip(1).map(|x| *x).collect();
+        let bound = self.params.params[0];
+        let rest: Vec<MemoryAddress> = self.params.params.iter().skip(1).map(|x| *x).collect();
         MethodCallParams {
             bound_pyobj: bound,
             params: rest
@@ -43,7 +81,7 @@ impl<'a> CallParams<'a> {
     }
 
     pub fn as_function(&self) -> FunctionCallParams {
-        let rest: Vec<MemoryAddress> = self.params.iter().map(|x| *x).collect();
+        let rest: Vec<MemoryAddress> = self.params.params.iter().map(|x| *x).collect();
         FunctionCallParams {
             params: rest
         }
@@ -669,7 +707,7 @@ impl Runtime {
     }
     
 
-    pub fn run_function(&self, temp_stack: &mut Vec<MemoryAddress>, 
+    pub fn run_function(&self, mut positional_params: PositionalParameters, 
         function_addr: MemoryAddress, bound_addr: Option<MemoryAddress>) -> (MemoryAddress, StackFrame) {
         let func_name = self.get_function_name(function_addr);
         let pyobj_func = self.try_load_function(function_addr);
@@ -682,15 +720,14 @@ impl Runtime {
                         None => self.pop_stack()
                     };
                     //println!("Bounded value: {:?}", unsafe { &*bounded});
-                    temp_stack.push(bounded);
+                    positional_params.params.insert(0, bounded);
                 }
                 
-                temp_stack.reverse();
                 self.new_stack_frame(func_name);
                 let call_params = CallParams {
                     func_address: function_addr,
                     func_name: name.as_deref(),//.map(|x| x.as_str()),
-                    params: &temp_stack,
+                    params: positional_params,
                 };
                 
                 let result = (code.code)(self, call_params);
@@ -698,25 +735,38 @@ impl Runtime {
                 let popped_stacked_frame = self.pop_stack_frame();
                 (result, popped_stacked_frame)
             }
-            PyObjectStructure::UserDefinedFunction {code, qualname, ..} => {
+            PyObjectStructure::UserDefinedFunction {code, qualname, defaults} => {
                 let mut expected_number_args = code.code.params.len();
                 if let Some(_) = bound_addr {
                     expected_number_args -= 1; //because self is already being passed
                 }
                 
-                if expected_number_args != temp_stack.len() {
-                    panic!("Function {} expects {} parameters, but {} were provided", qualname, code.code.params.len(), temp_stack.len());
+                if defaults.len() == 0 {
+                    if expected_number_args != positional_params.params.len() {
+                        panic!("Function {} expects {} parameters, but {} were provided", qualname, code.code.params.len(), positional_params.params.len());
+                    }
+                } else {
+                    let non_default_params = expected_number_args - defaults.len();
+                    if non_default_params > positional_params.params.len() {
+                        panic!("Function {} expects {} non-default parameters, but {} were provided", qualname, code.code.params.len(), positional_params.params.len());
+                    }
+
+                    //pass the last N parameters that are necessary
+                    let to_pass = defaults.iter().skip(positional_params.params.len());
+
+                    for mem_addr in to_pass {
+                        positional_params.params.insert(0, *mem_addr);
+                    }
                 }
-                temp_stack.reverse();
     
                 self.new_stack_frame(func_name);
                 if let Some(a) = bound_addr {
                     self.bind_local(0, a); 
-                    for (number, addr) in temp_stack.iter().enumerate() {
+                    for (number, addr) in positional_params.params.iter().enumerate() {
                         self.bind_local(number + 1, *addr);
                     }
                 } else {
-                    for (number, addr) in temp_stack.iter().enumerate() {
+                    for (number, addr) in positional_params.params.iter().enumerate() {
                         self.bind_local(number, *addr);
                     }
                 }
@@ -730,7 +780,7 @@ impl Runtime {
                 (result_addr, popped_stacked_frame)
             }
             PyObjectStructure::BoundMethod {function_address, bound_address} => {
-                self.run_function(temp_stack, *function_address, Some(*bound_address))
+                self.run_function(positional_params, *function_address, Some(*bound_address))
             }
             _ => {
                 panic!("Not a function at addr: {:?}", function_addr);
@@ -742,12 +792,12 @@ impl Runtime {
         &self,
         bound_addr: MemoryAddress,
         method_name: &str,
-        params: &[MemoryAddress],
+        params: PositionalParameters,
     ) -> Option<(MemoryAddress, StackFrame)> {
         let pyobj = self.get_pyobj_byaddr(bound_addr);
         self.get_method_addr_byname(pyobj.type_addr, method_name)
             .map(move |method_addr| {
-                self.run_function(&mut params.to_vec(), method_addr, Some(bound_addr))
+                self.run_function(params, method_addr, Some(bound_addr))
             })
     }
 
@@ -908,7 +958,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", &[number2])
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
@@ -924,7 +974,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", &[number2])
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
@@ -941,7 +991,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", &[number2])
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -958,7 +1008,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", &[number2])
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -976,7 +1026,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", &[number2])
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -994,7 +1044,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__mul__", &[number2])
+            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -1010,7 +1060,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__mul__", &[number2])
+            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(vec![number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 

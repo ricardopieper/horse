@@ -2878,11 +2878,11 @@ def function(x, y = None):
         let result = parse_ast(tokens);
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
-            parameters: vec![FunctionParameter::Simple("x".into())],
+            parameters: vec![FunctionParameter::Simple("x".into()), FunctionParameter::DefaultValue("y".into(), Expr::None)],
             body: vec![AST::Return(Some(Expr::BinaryOperation(
                 Box::new(Expr::Variable("x".into())),
                 Operator::Plus,
-                Box::new(Expr::IntegerValue(1)),
+                Box::new(Expr::Variable("y".into())),
             )))],
         }];
         assert_eq!(expected, result);

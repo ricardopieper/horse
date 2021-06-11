@@ -363,7 +363,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let mut default_instructions = vec![];
                 for param in parameters.iter() {
                     if let FunctionParameter::DefaultValue(_, expr) = param {
-                        let compiled_expr = compile_expr(expr, &mut new_const_map);
+                        let compiled_expr = compile_expr(expr, const_map);
                         default_instructions.extend(compiled_expr);
                         number_of_default_parameters += 1;
                     }

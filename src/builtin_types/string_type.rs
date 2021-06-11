@@ -110,7 +110,7 @@ fn create_new(runtime: &Runtime, params: CallParams) -> MemoryAddress {
     } else {
         check_builtin_func_params!("str", 1, params.params.len());
         //try call the __str__ method on the parameter
-        let string_call = runtime.call_method(params.params[0], "__str__", &[]);
+        let string_call = runtime.call_method(params.params.params[0], "__str__", PositionalParameters::empty());
         match string_call {
             Some((addr, _)) => addr,
             None => panic!("Object passed to str does not have __str__ method"),

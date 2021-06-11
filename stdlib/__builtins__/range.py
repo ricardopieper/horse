@@ -1,5 +1,8 @@
 class range:
     def __init__(self, param1, param2 = None):
+
+        print("param1 = "+str(param1)+" param2 = "+str(param2))
+
         if param2 == None:
             self.current = 0
             self.max = param1

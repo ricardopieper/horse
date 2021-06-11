@@ -19,7 +19,7 @@ pub fn handle_function_call(runtime: &Runtime, number_args: usize) {
         runtime.increase_refcount(*addr);
     }
 
-    let (returned_value, _) = runtime.run_function(&mut temp_stack, function_addr, None);
+    let (returned_value, _) = runtime.run_function(PositionalParameters::from_stack_popped(temp_stack.clone()), function_addr, None);
 
     //increase refcount so it survives the pop_stack_frame call. Returned value should have 
     let refcount = runtime.get_refcount(returned_value);
@@ -493,24 +493,7 @@ fn handle_binary_truediv(runtime: &Runtime) {
 }
 
 pub fn handle_load_name(runtime: &Runtime, code_obj: &CodeObjectContext, name: usize) {
-    /*match runtime.get_local(name) {
-        Some(addr) => runtime.push_onto_stack(addr),
-        None => match runtime.builtin_names.get(name).map(|addr| *addr) {
-            Some(addr) => runtime.push_onto_stack(addr),
-            None => match code_obj.code.names.get(name) {
-                //@TODO shouldn't it load from the main module first? Or even better, the current module being executed?
-                Some(name_str) => match runtime.find_in_module(BUILTIN_MODULE, name_str) {
-                    Some(addr) => runtime.push_onto_stack(addr),
-                    None => match runtime.find_in_module(MAIN_MODULE, name_str) {
-                        Some(addr) => runtime.push_onto_stack(addr),
-                        None => panic!("Could not find name {}", name_str),
-                    }
-                },
-                None => panic!("Could not find name")
-            },
-        }
-    }*/
-
+    
     match runtime.get_local(name) {
         Some(addr) => runtime.push_onto_stack(addr),
         None => match code_obj.code.names.get(name) {
@@ -552,7 +535,7 @@ pub fn handle_jump_if_false_pop(runtime: &Runtime, destination: usize) -> bool {
         runtime.decrease_refcount(stack_top);
         return result;
     } else {
-        let (as_boolean, _) = runtime.call_method(stack_top, "__bool__", &[]).unwrap();
+        let (as_boolean, _) = runtime.call_method(stack_top, "__bool__", PositionalParameters::empty()).unwrap();
         let raw_value = runtime.get_raw_data_of_pyobj(as_boolean).take_int();
         let result = if raw_value == 0 {
             runtime.set_pc(destination);
@@ -686,41 +669,11 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
                 let instance = method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance);
                 method_runtime.increase_refcount(instance);
                 method_runtime.increase_refcount(instance);
-                
-                //run the __init__ method if it exists
-                match method_runtime.get_method_addr_byname(type_addr, "__init__") {
-                    Some(init_addr) => {
-                        let pyobj_method = method_runtime.get_pyobj_byaddr(init_addr);
-                
-                        match &pyobj_method.structure {
-                            PyObjectStructure::UserDefinedFunction {code, ..} => {
 
-                                method_runtime.new_stack_frame(code.code.objname.clone());
-                                method_runtime.bind_local(0, instance);
-
-                                for (index, item) in call_params.params.iter().enumerate() {
-                                    method_runtime.bind_local(index + 1, *item);
-                                }
-
-                                execute_code_object(method_runtime, code);
-                                method_runtime.pop_stack_frame();
-                            },
-                            _ => panic!("Unexpected")
-                        }
-                    },
-                    None => {
-                        panic!("Method __init__ does not exist on object {:?}", unsafe {&*type_addr})
-                    }
-                };
+                method_runtime.call_method(instance, "__init__", call_params.params);
                 
                 return instance;
             });
-
-
-
-            //  runtime.register_bounded_func_on_addr(type_addr, "__new__", move |method_runtime: &Runtime, _params: CallParams| -> MemoryAddress {
-            //      method_runtime.allocate_type_byaddr_raw(type_addr, BuiltInTypeData::ClassInstance)
-            //  });
 
             runtime.push_onto_stack(type_addr);
         }
@@ -761,7 +714,7 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             let iterator = runtime.top_stack();
 
             //this assumes the iterator is on the top of the call already
-            let (next, popped_frame) = runtime.call_method(iterator, "__next__", &[]).unwrap();
+            let (next, popped_frame) = runtime.call_method(iterator, "__next__", PositionalParameters::empty()).unwrap();
             
             if let Some(exception_addr) = popped_frame.exception {
                 if exception_addr == runtime.special_values[&SpecialValue::StopIterationType] {
