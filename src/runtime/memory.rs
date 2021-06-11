@@ -250,7 +250,7 @@ impl Memory for UnsafeMemory {
         match dealloc {
             Some(address) => {
                 unsafe {
-                    println!("allocate_and_write: Writing at {:p}, data = {:?}", address, data);
+                    //println!("allocate_and_write: Writing at {:p}, data = {:?}", address, data);
                     *address = data;
                 };
                 return address;

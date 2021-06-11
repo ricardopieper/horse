@@ -352,7 +352,23 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let mut func_instructions = compile_ast_internal(body, 0, Some(qualname.clone()), true, results, &mut new_const_map);
                 func_instructions.main = false;
                
-                func_instructions.params = parameters.clone();
+                func_instructions.params = parameters.iter()
+                    .map(|x| match x {
+                        FunctionParameter::Simple(x) => x.clone(),
+                        FunctionParameter::DefaultValue(x, _) => x.clone()
+                    }).collect();
+
+                //we must generate the bytecode for default values
+                let mut number_of_default_parameters = 0;
+                let mut default_instructions = vec![];
+                for param in parameters.iter() {
+                    if let FunctionParameter::DefaultValue(_, expr) = param {
+                        let compiled_expr = compile_expr(expr, &mut new_const_map);
+                        default_instructions.extend(compiled_expr);
+                        number_of_default_parameters += 1;
+                    }
+                }
+
                 resolve_loads_stores(&mut func_instructions);
 
                 let constval_code = Const::CodeObject(func_instructions);
@@ -360,9 +376,11 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 let constval_name = Const::String(qualname.clone());
                 let mut name_idx = process_constval(constval_name, const_map);
 
+                all_instructions.extend(default_instructions);
+                all_instructions.push(Instruction::BuildList { number_elements:number_of_default_parameters });
                 all_instructions.append(&mut code_idx);
                 all_instructions.append(&mut name_idx);
-                all_instructions.push(Instruction::MakeFunction);
+                all_instructions.push(Instruction::MakeFunction(number_of_default_parameters > 0));
                 all_instructions.push(Instruction::UnresolvedStoreName(function_name.clone()));
                 
             }

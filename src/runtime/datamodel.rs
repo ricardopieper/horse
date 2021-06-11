@@ -107,6 +107,7 @@ pub enum PyObjectStructure {
     UserDefinedFunction {
         code: CodeObjectContext,
         qualname: String,
+        defaults: Vec<MemoryAddress>
     },
     BoundMethod {
         function_address: MemoryAddress,

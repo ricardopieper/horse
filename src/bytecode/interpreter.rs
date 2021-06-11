@@ -617,14 +617,35 @@ pub fn execute_next_instruction(runtime: &Runtime, code: &CodeObjectContext) {
             handle_jump_unconditional(runtime, *destination);
             advance_pc = false;
         }
-        Instruction::MakeFunction => {
+        Instruction::MakeFunction(has_default_params) => {
             let name_addr = runtime.pop_stack();
             let codeobj_addr = runtime.pop_stack();
 
             let qualname = runtime.get_pyobj_byaddr(name_addr).try_get_builtin().unwrap().take_string().clone();
             let codeobj = runtime.get_pyobj_byaddr(codeobj_addr).try_get_builtin().unwrap().take_code_object().clone();
+            
 
-            let function_addr = runtime.allocate_user_defined_function(codeobj, qualname.clone());
+
+            let function_addr = if *has_default_params {
+                //When there are default params, we will do something sneaky
+                //the previous instructions will actually build a list of positional arguments
+                //allowing the function to be called passing a variable numer of arguments.
+
+                //So yes, the top stack parameter is a list of memory addresses, a python list,
+                //containing the positional parameters.
+
+                //We'll have to calculate how many of the default parameters we will use 
+                //at the time the function is called.
+
+                //@TODO remember to add a check in the parser: default arguments must be the last parameters of the function.
+
+                let default_params = runtime.pop_stack();
+                let as_list = runtime.get_raw_data_of_pyobj(default_params).take_list();
+
+                runtime.allocate_user_defined_function(codeobj, qualname.clone(), as_list.to_vec())
+            } else {
+                runtime.allocate_user_defined_function(codeobj, qualname.clone(), vec![])
+            };
             runtime.add_to_module(MAIN_MODULE, qualname.as_str(), function_addr);
             runtime.push_onto_stack(function_addr);
         }

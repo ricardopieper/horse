@@ -24,8 +24,6 @@ fn main() {
         //println!("Tokens: {:?}", tokens);
         let ast = parser::parse_ast(tokens.unwrap());
 
-        //println!("AST: {:?}", ast);
-
         let program = bytecode::compiler::compile(ast);
         bytecode::interpreter::execute_program(&mut runtime, program);
        

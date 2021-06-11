@@ -1,7 +1,11 @@
 class range:
-    def __init__(self, max):
-        self.current = 0
-        self.max = max
+    def __init__(self, param1, param2 = None):
+        if param2 == None:
+            self.current = 0
+            self.max = param1
+        else:
+            self.current = param1
+            self.max = param2
 
     def __next__(self):
         if self.current >= self.max:

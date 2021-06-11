@@ -478,12 +478,13 @@ impl Runtime {
     pub fn allocate_user_defined_function(
         &self,
         code: CodeObjectContext,
-        qualname: String
+        qualname: String,
+        defaults: Vec<MemoryAddress>
     ) -> MemoryAddress {
         let obj = PyObject {
             properties: HashMap::new(),
             type_addr: self.builtin_type_addrs.code_object,
-            structure: PyObjectStructure::UserDefinedFunction { code, qualname },
+            structure: PyObjectStructure::UserDefinedFunction { code, qualname, defaults },
             is_const: true,
         };
         return self.allocate_and_write(obj);
@@ -697,7 +698,7 @@ impl Runtime {
                 let popped_stacked_frame = self.pop_stack_frame();
                 (result, popped_stacked_frame)
             }
-            PyObjectStructure::UserDefinedFunction {code, qualname} => {
+            PyObjectStructure::UserDefinedFunction {code, qualname, ..} => {
                 let mut expected_number_args = code.code.params.len();
                 if let Some(_) = bound_addr {
                     expected_number_args -= 1; //because self is already being passed

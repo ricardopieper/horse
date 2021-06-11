@@ -25,6 +25,12 @@ pub struct ASTIfStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionParameter {
+    Simple(String),
+    DefaultValue(String, Expr)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AST {
     StandaloneExpr(Expr),
     Assign {
@@ -51,7 +57,7 @@ pub enum AST {
     },
     DeclareFunction {
         function_name: String,
-        parameters: Vec<String>,
+        parameters: Vec<FunctionParameter>,
         body: Vec<AST>,
     },
     Break,
@@ -496,15 +502,32 @@ impl Parser {
                 } else {
                     panic!("Expected open paren function name")
                 }
-                let mut params: Vec<String> = vec![];
+                let mut params: Vec<FunctionParameter> = vec![];
 
                 while let Token::Identifier(name) = self.cur() {
                     let param_name = name.clone();
-                    params.push(param_name);
+                    
                     self.next();
                     if let Token::Comma = self.cur() {
+                        params.push(FunctionParameter::Simple(param_name));
                         self.next();
+                    } else if let Token::Assign = self.cur() {
+                        self.next();
+
+                        //this is potentially a default value expression
+                        let expr = self.parse_expr();
+
+                        match expr {
+                            Ok(expr) => {
+                                params.push(FunctionParameter::DefaultValue(param_name, expr.resulting_expr));
+                            },
+                            Err(e) => {
+                                panic!("Error parsing default value expr: {:?}", e);
+                            }
+                        }
+
                     } else {
+                        params.push(FunctionParameter::Simple(param_name));
                         break;
                     }
                 }
@@ -2750,7 +2773,7 @@ def function(x):
         let result = parse_ast(tokens);
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
-            parameters: vec!["x".into()],
+            parameters: vec![FunctionParameter::Simple("x".into())],
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
                 Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("x".into())],
@@ -2792,7 +2815,9 @@ def function(x,y,z):
         let result = parse_ast(tokens);
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
-            parameters: vec!["x".into(), "y".into(), "z".into()],
+            parameters: vec![FunctionParameter::Simple("x".into()), 
+                             FunctionParameter::Simple("y".into()), 
+                             FunctionParameter::Simple("z".into())],
             body: vec![AST::StandaloneExpr(Expr::FunctionCall(
                 Box::new(Expr::Variable("print".into())),
                 vec![Expr::Variable("x".into())],
@@ -2813,7 +2838,7 @@ def function(x):
         let result = parse_ast(tokens);
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
-            parameters: vec!["x".into()],
+            parameters: vec![FunctionParameter::Simple("x".into())],
             body: vec![AST::Return(None)],
         }];
         assert_eq!(expected, result);
@@ -2831,7 +2856,29 @@ def function(x):
         let result = parse_ast(tokens);
         let expected = vec![AST::DeclareFunction {
             function_name: "function".into(),
-            parameters: vec!["x".into()],
+            parameters: vec![FunctionParameter::Simple("x".into())],
+            body: vec![AST::Return(Some(Expr::BinaryOperation(
+                Box::new(Expr::Variable("x".into())),
+                Operator::Plus,
+                Box::new(Expr::IntegerValue(1)),
+            )))],
+        }];
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn default_params() {
+        let tokens = tokenize(
+            "
+def function(x, y = None):
+    return x + y
+",
+        )
+        .unwrap();
+        let result = parse_ast(tokens);
+        let expected = vec![AST::DeclareFunction {
+            function_name: "function".into(),
+            parameters: vec![FunctionParameter::Simple("x".into())],
             body: vec![AST::Return(Some(Expr::BinaryOperation(
                 Box::new(Expr::Variable("x".into())),
                 Operator::Plus,
@@ -2869,7 +2916,7 @@ class SomeClass:
                 },
                 AST::DeclareFunction {
                     function_name: "__init__".into(),
-                    parameters: vec!["self".into()],
+                    parameters: vec![FunctionParameter::Simple("self".into())],
                     body: vec![AST::Assign {
                         path: vec!["self".into(), "x".into()],
                         expression: Expr::IntegerValue(1),
@@ -2877,7 +2924,7 @@ class SomeClass:
                 },
                 AST::DeclareFunction {
                     function_name: "test".into(),
-                    parameters: vec!["self".into()],
+                    parameters: vec![FunctionParameter::Simple("self".into())],
                     body: vec![AST::Return(Some(Expr::BinaryOperation(
                         Box::new(Expr::MemberAccess(
                             Box::new(Expr::Variable("self".into())),

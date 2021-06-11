@@ -14,7 +14,7 @@ pub enum Const {
 pub enum Instruction {
     LoadConst(usize),
     LoadAttr(String),
-    MakeFunction,
+    MakeFunction(bool),
     MakeClass,
     StoreName(usize),
     StoreAttr(usize),
