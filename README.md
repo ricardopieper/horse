@@ -8,18 +8,18 @@ However, the goal is to support a good amount of Python functionality.
 
 This interpreter has the following parts:
 
-    - Parser
-    - Compiler (AST to bytecode)
-    - Virtual Machine
+ - Parser
+ - Compiler (AST to bytecode)
+ - Virtual Machine
 
 
 Currently, the following features are supported:
 
-    - Basic syntax: `if`, `else`, `while`
-    - Literal syntax for lists. Dictionaries are not supported yet.
-    - You can raise exceptions but you can't use `try/except`.
-    - Function and class definition with default parameters. This implementation is incomplete: there is no support for inheritance yet, or named parameters.
-    - Iterator protocol. Some built-in classes like `list_iterator` and `range` are implemented using the language itself (not a Rust native function). This might be slower, but it is cool :)
+ - Basic syntax: `if`, `else`, `while`
+ - Literal syntax for lists. Dictionaries are not supported yet.
+ - You can raise exceptions but you can't use `try/except`.
+ - Function and class definition with default parameters. This implementation is incomplete: there is no support for inheritance yet, or named parameters.
+ - Iterator protocol. Some built-in classes like `list_iterator` and `range` are implemented using the language itself (not a Rust native function). This might be slower, but it is cool :)
 
 
 If you want a better implementation of Python written in Rust, check out https://github.com/RustPython/RustPython. They even have `pip` working.
