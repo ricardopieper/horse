@@ -7,7 +7,7 @@ use std::collections::HashMap;
 /* this is done by somewhat following the python data model in https://docs.python.org/3/reference/datamodel.html */
 
 pub struct PyCallable {
-    pub code: Box<dyn Fn(&Runtime, CallParams) -> MemoryAddress>,
+    pub code: Box<dyn Fn(&VM, CallParams) -> MemoryAddress>,
 }
 
 impl std::fmt::Debug for PyCallable {
@@ -125,7 +125,7 @@ pub struct StackFrame {
     pub prog_counter: Cell<usize>,
 }
 
-pub struct Runtime {
+pub struct VM {
     pub stack: RefCell<Vec<StackFrame>>,
     pub memory: UnsafeMemory,
     pub builtin_type_addrs: BuiltinTypeAddresses,
@@ -134,11 +134,11 @@ pub struct Runtime {
     //pub builtin_names: Vec<MemoryAddress>,
 }
 
-impl Runtime {
-    pub fn new() -> Runtime {
+impl VM {
+    pub fn new() -> VM {
         let memory = UnsafeMemory::new();
         let nullptr = memory.null_ptr();
-        let mut interpreter = Runtime {
+        let mut interpreter = VM {
             stack: RefCell::new(vec![StackFrame {
                 function_name: "__main__".to_owned(),
                 local_namespace: vec![],
@@ -595,7 +595,7 @@ impl Runtime {
         name: &str,
         callable: F,
     ) where
-        F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static,
+        F: Fn(&VM, CallParams) -> MemoryAddress + 'static,
     {
         let pycallable = PyCallable {
             code: Box::new(callable),
@@ -616,7 +616,7 @@ impl Runtime {
         name: &str,
         callable: F,
     ) where
-        F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static,
+        F: Fn(&VM, CallParams) -> MemoryAddress + 'static,
     {
         let type_addr = self.find_in_module(module_name, type_name).unwrap();
         self.register_bounded_func_on_addr(type_addr, name, callable);
@@ -628,7 +628,7 @@ impl Runtime {
         name: &str,
         callable: F,
     ) where
-        F: Fn(&Runtime, CallParams) -> MemoryAddress + 'static,
+        F: Fn(&VM, CallParams) -> MemoryAddress + 'static,
     {
         let pycallable = PyCallable {
             code: Box::new(callable),
@@ -772,7 +772,7 @@ impl Runtime {
                 }
                 
                 //what a mess
-                crate::bytecode::interpreter::execute_code_object(self, &code);
+                crate::runtime::interpreter::execute_code_object(self, &code);
     
                 let result_addr = self.top_stack();
                 self.increase_refcount(result_addr);
@@ -931,7 +931,7 @@ mod tests {
     use crate::commons::float::Float;
     #[test]
     fn simply_instantiate_int() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let pyobj_int_addr =
             interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn simply_instantiate_bool() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let pyobj_int_addr =
             interpreter.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1));
@@ -951,7 +951,7 @@ mod tests {
 
     #[test]
     fn call_int_add_int() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
         let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
@@ -967,7 +967,7 @@ mod tests {
 
     #[test]
     fn call_bool_add_int() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_builtin_type_byname_raw("bool", BuiltInTypeData::Int(1));
         let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
@@ -983,7 +983,7 @@ mod tests {
 
     #[test]
     fn call_int_add_float() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(1));
         let number2 = interpreter
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn call_float_add_int() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter
             .allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.5)));
@@ -1017,7 +1017,7 @@ mod tests {
 
     #[test]
     fn call_float_add_float() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter
             .allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(3.4)));
@@ -1035,7 +1035,7 @@ mod tests {
 
     #[test]
     fn call_float_mul_float() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter
             .allocate_builtin_type_byname_raw("float", BuiltInTypeData::Float(Float(2.0)));
@@ -1053,7 +1053,7 @@ mod tests {
 
     #[test]
     fn call_int_mul_int() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number1 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(2));
         let number2 = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(3));
@@ -1069,7 +1069,7 @@ mod tests {
 
     #[test]
     fn bind_local_test() {
-        let mut interpreter = Runtime::new();
+        let mut interpreter = VM::new();
         register_builtins(&mut interpreter);
         let number = interpreter.allocate_builtin_type_byname_raw("int", BuiltInTypeData::Int(17));
         interpreter.bind_local(0, number);

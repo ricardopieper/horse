@@ -934,7 +934,7 @@ impl Parser {
                         //parsing a parenthesized expression.
                         //A function call open paren can only appear in the following scenarios:
                         // - An expression that hasn't been fully parsed yet like `an_identifier` but next token is `(`
-                        // - `"a literal token"` and then `(` is also a valid function call. It just doesn't work in runtime. Same goes for int and float literals
+                        // - `"a literal token"` and then `(` is also a valid function call. It just doesn't work in vm. Same goes for int and float literals
                         // - `some_map['mapKey']` and then `(` is also valid, will load the function from map and call it
                         // - `some_array[index]()` similarly
                         // - `function_call()` and then `(` would work if the function returns another function

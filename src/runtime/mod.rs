@@ -1,4 +1,5 @@
 pub mod datamodel;
 pub mod memory;
 #[macro_use]
-pub mod runtime;
+pub mod vm;
+pub mod interpreter;

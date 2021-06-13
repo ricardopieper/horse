@@ -12,9 +12,9 @@ use crate::ast::lexer;
 use crate::ast::parser;
 
 fn main() {
-    let mut runtime = runtime::runtime::Runtime::new();
-    builtin_types::register_builtins(&mut runtime);
-    builtin_types::loader::run_loader(&mut runtime);
+    let mut vm = runtime::vm::VM::new();
+    builtin_types::register_builtins(&mut vm);
+    builtin_types::loader::run_loader(&mut vm);
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 2 {
@@ -25,7 +25,7 @@ fn main() {
         let ast = parser::parse_ast(tokens.unwrap());
 
         let program = bytecode::compiler::compile(ast);
-        bytecode::interpreter::execute_program(&mut runtime, program);
+        runtime::interpreter::execute_program(&mut vm, program);
        
         return;
     }
@@ -53,18 +53,18 @@ fn main() {
                 let tokens = lexer::tokenize(input.as_str());
                 let ast = parser::parse_ast(tokens.unwrap());
                 let program = bytecode::compiler::compile_repl(ast);
-                bytecode::interpreter::execute_program(&mut runtime, program);
-                let result_addr = runtime.get_stack_offset(-1);
-                let result_string = runtime.call_method(result_addr, "__repr__", runtime::runtime::PositionalParameters::empty());
+                runtime::interpreter::execute_program(&mut vm, program);
+                let result_addr = vm.get_stack_offset(-1);
+                let result_string = vm.call_method(result_addr, "__repr__", runtime::vm::PositionalParameters::empty());
                 match result_string {
                     None => {}
                     Some((addr, _)) => {
-                        let pyobj_str = runtime.get_raw_data_of_pyobj(addr).take_string();
+                        let pyobj_str = vm.get_raw_data_of_pyobj(addr).take_string();
                         println!("{}", pyobj_str);
                     }
                 }
 
-                runtime.set_pc(0);
+                vm.set_pc(0);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

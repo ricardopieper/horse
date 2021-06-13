@@ -585,8 +585,8 @@ fn make_code_object(instrs: Vec<Instruction>, name: String, const_map: &mut BTre
 mod tests {
     use super::*;
     use crate::builtin_types::*;
-    use crate::bytecode::interpreter;
-    use crate::runtime::runtime::Runtime;
+    use crate::runtime::interpreter;
+    use crate::runtime::vm::VM;
 
     #[test]
     fn run_pytests() -> std::io::Result<()> {
@@ -595,13 +595,13 @@ mod tests {
             let dir = entry?;
             println!("Loading source {:?}", dir.path());
             let source = std::fs::read_to_string(dir.path());
-            let mut runtime = Runtime::new();
-            register_builtins(&mut runtime);
-            loader::run_loader(&mut runtime);
+            let mut vm = VM::new();
+            register_builtins(&mut vm);
+            loader::run_loader(&mut vm);
             let tokens = tokenize(&source.unwrap()).unwrap();
             let expr = parse_ast(tokens);
             let program = compile(expr);
-            interpreter::execute_program(&mut runtime, program);
+            interpreter::execute_program(&mut vm, program);
         }
         
         Ok(())
@@ -609,80 +609,80 @@ mod tests {
 
     #[test]
     fn test_literal_int_1() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("1").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
 
     #[test]
     fn test_literal_float_1() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("1.0").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 1.0);
     }
 
     #[test]
     fn test_literal_boolean_true() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("True").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 1);
     }
 
     #[test]
     fn test_literal_boolean_false() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("False").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 0);
     }
 
     #[test]
     fn test_1_plus_1() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("1 + 1").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_int();
         assert_eq!(stack_value, 2);
     }
 
     #[test]
     fn test_1_plus_float_3_5() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("1 + 3.5").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
         println!("program: {:?}", program.code_objects);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, 4.5);
     }
 
@@ -690,14 +690,14 @@ mod tests {
     fn test_neg() {
         //-(5.0 / 9.0)
         let expected_result = -(5.0_f64 / 9.0_f64);
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("-(5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -705,14 +705,14 @@ mod tests {
     fn test_div_neg_mul() {
         //-(5.0 / 9.0) * 32)
         let expected_result = -(5.0_f64 / 9.0_f64) * 32.0_f64;
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("-(5.0 / 9.0) * 32.0").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -720,28 +720,28 @@ mod tests {
     fn test_div_minus_div() {
         //(1 - (5.0 / 9.0))
         let expected_result = 1.0_f64 - (5.0_f64 / 9.0_f64);
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("1.0 - (5.0 / 9.0)").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_fahrenheit() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64) / (1.0_f64 - (5.0_f64 / 9.0_f64));
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("(-(5.0 / 9.0) * 32.0) / (1.0 - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
@@ -749,82 +749,82 @@ mod tests {
     fn test_function_calls_with_complex_expr() {
         let expected_result = (-(5.0_f64 / 9.0_f64) * 32.0_f64).sin().cos()
             / (1.0_f64.cos() - (5.0_f64 / 9.0_f64)).tanh();
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens =
             tokenize("cos(sin(-(5.0 / 9.0) * 32.0)) / tanh(cos(1.0) - (5.0 / 9.0))").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_fcall() {
         let expected_result = 1.0_f64.sin();
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("sin(1.0)").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_pop = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_pop).take_float();
+        interpreter::execute_program(&mut vm, program);
+        let stack_pop = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_pop).take_float();
         assert_eq!(stack_value, expected_result);
     }
 
     #[test]
     fn test_bind_local() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("x = 1 + 2").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let x = runtime.get_local(0).unwrap();
-        let stack_value = runtime.get_raw_data_of_pyobj(x).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let x = vm.get_local(0).unwrap();
+        let stack_value = vm.get_raw_data_of_pyobj(x).take_int();
         assert_eq!(stack_value, 3);
     }
 
     #[test]
     fn test_string_concat() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("\"abc\" + 'cde'").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_string();
+        interpreter::execute_program(&mut vm, program);
+        let stack_top = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_top).take_string();
         assert_eq!(stack_value, "abccde");
     }
 
     #[test]
     fn boolean_and() {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("True and False").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_raw_data_of_pyobj(stack_top).take_int();
+        interpreter::execute_program(&mut vm, program);
+        let stack_top = vm.get_stack_offset(-1);
+        let stack_value = vm.get_raw_data_of_pyobj(stack_top).take_int();
         assert_eq!(stack_value, 0);
     }
     use crate::runtime::datamodel::*;
     #[test]
     fn load_method_with_loadattr_instruction() -> Result<(), String> {
-        use crate::runtime::runtime::Runtime;
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        use crate::runtime::vm::VM;
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("\"abc\".lower").unwrap();
         let expr = parse_ast(tokens);
         let program =  compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_pyobj_byaddr(stack_top);
+        interpreter::execute_program(&mut vm, program);
+        let stack_top = vm.get_stack_offset(-1);
+        let stack_value = vm.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::BoundMethod { .. } => {
                 Ok(())                   
@@ -837,14 +837,14 @@ mod tests {
 
     #[test]
     fn load_module_property_with_loadattr_instruction() -> Result<(), String> {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("__builtins__.float").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
-        let stack_top = runtime.get_stack_offset(-1);
-        let stack_value = runtime.get_pyobj_byaddr(stack_top);
+        interpreter::execute_program(&mut vm, program);
+        let stack_top = vm.get_stack_offset(-1);
+        let stack_value = vm.get_pyobj_byaddr(stack_top);
         match &stack_value.structure {
             PyObjectStructure::Type {
                 name, functions:_, supertype: _
@@ -864,8 +864,8 @@ mod tests {
 
     #[test]
     fn runs_classdef() -> Result<(), String> {
-        let mut runtime = Runtime::new();
-        register_builtins(&mut runtime);
+        let mut vm = VM::new();
+        register_builtins(&mut vm);
         let tokens = tokenize("
 class SomeClass:
     def __init__(self):        
@@ -873,7 +873,7 @@ class SomeClass:
 ").unwrap();
         let expr = parse_ast(tokens);
         let program = compile_repl(expr);
-        interpreter::execute_program(&mut runtime, program);
+        interpreter::execute_program(&mut vm, program);
         Ok(())
     }
 }

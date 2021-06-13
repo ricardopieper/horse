@@ -1,5 +1,5 @@
 use crate::commons::float::*;
-use crate::runtime::runtime::*;
+use crate::runtime::vm::*;
 use crate::runtime::memory::*;
 use crate::bytecode::program::CodeObject;
 use std::fmt::Debug;
