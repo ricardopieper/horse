@@ -559,6 +559,7 @@ pub fn handle_build_list(vm: &VM, size: usize) {
     }
     elements.reverse();
 
+    //This bypasses the list.__new__ function
     let built_list = vm.allocate_type_byaddr_raw(
         vm.builtin_type_addrs.list,
         BuiltInTypeData::List(elements),
@@ -729,6 +730,7 @@ pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
             if let Some(exception_addr) = popped_frame.exception {
                 if exception_addr == vm.special_values[&SpecialValue::StopIterationType] {
                     vm.set_pc(*end_ptr);
+                    advance_pc = false;
                 }
             } else {
                 vm.push_onto_stack(next);   

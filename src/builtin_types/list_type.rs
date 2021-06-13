@@ -231,8 +231,48 @@ fn getitem(vm: &VM, params: CallParams) -> MemoryAddress {
 
 }
 
+fn create_new(vm: &VM, params: CallParams) -> MemoryAddress {
+    if params.params.len() == 0 {
+        return vm
+            .allocate_builtin_type_byname_raw("str", BuiltInTypeData::String(String::from("")));
+    } else {
+        if params.params.len() == 0 {
+            return vm.allocate_type_byaddr_raw(
+                vm.builtin_type_addrs.list,
+                BuiltInTypeData::List(vec![]),
+            );
+        } else {
+            check_builtin_func_params!("list", 1, params.params.len());
+            let iterator_call = vm.call_method(params.params.params[0], "__iter__", PositionalParameters::empty());
+            let mut results = vec![];
+            loop {
+                match iterator_call {
+                    Some((addr, _)) => {
+                        //start consuming the iterator
+                        let (result, frame) = vm.call_method(addr, "__next__", PositionalParameters::empty()).unwrap();
+                        if frame.exception.is_some() {
+                            break;
+                        } else {
+                            results.push(result);
+                        }
+                    },
+                    None => panic!("Object passed to list does not have __iter__ method"),
+                }
+            }   
+            return vm.allocate_type_byaddr_raw(
+                vm.builtin_type_addrs.list,
+                BuiltInTypeData::List(results),
+            );
+        }
+       
+    }
+}
+
+
 pub fn register_list_type(vm: &mut VM) -> MemoryAddress {
     let list_type = vm.create_type(BUILTIN_MODULE, "list", None);
+
+    vm.register_type_unbounded_func(list_type, "__new__", create_new);
 
     vm.register_bounded_func(BUILTIN_MODULE, "list", "__add__", concat);
     vm.register_bounded_func(BUILTIN_MODULE, "list", "__eq__", equals);
