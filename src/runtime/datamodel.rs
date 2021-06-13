@@ -3,7 +3,7 @@ use crate::runtime::vm::*;
 use crate::runtime::memory::*;
 use crate::bytecode::program::CodeObject;
 use std::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub const BUILTIN_MODULE: &'static str = "__builtins__";
 pub const MAIN_MODULE: &'static str = "__main__";
@@ -89,7 +89,7 @@ pub struct ProgramContext {
     pub code_objects: Vec<CodeObjectContext>,
 }
 
-type Namespace = HashMap<String, MemoryAddress>;
+type Namespace = BTreeMap<String, MemoryAddress>;
 
 #[derive(Debug)]
 pub enum PyObjectStructure {
@@ -115,7 +115,7 @@ pub enum PyObjectStructure {
     },
     Type {
         name: String,
-        functions: HashMap<String, MemoryAddress>,
+        functions: BTreeMap<String, MemoryAddress>,
         supertype: Option<MemoryAddress>,
     },
     Module {
@@ -128,7 +128,7 @@ pub enum PyObjectStructure {
 pub struct PyObject {
     pub type_addr: MemoryAddress,
     pub structure: PyObjectStructure,
-    pub properties: HashMap<String, MemoryAddress>,
+    pub properties: BTreeMap<String, MemoryAddress>,
     pub is_const: bool,
 }
 

@@ -6,6 +6,13 @@ Horse is a toy implementation of Python in Rust.
 Since this is a toy implementation, not every python program will run in it.
 However, the goal is to support a good amount of Python functionality.
 
+This interpreter has the following parts:
+
+    - Parser
+    - Compiler (AST to bytecode)
+    - Virtual Machine
+
+
 Currently, the following features are supported:
 
     - Basic syntax: `if`, `else`, `while`
@@ -16,6 +23,7 @@ Currently, the following features are supported:
 
 
 If you want a better implementation of Python written in Rust, check out https://github.com/RustPython/RustPython. They even have `pip` working.
+
 
 Robustness
 ----------
@@ -45,19 +53,3 @@ It also stores a function in the module with the same name as the class. This fu
 of the defined type, and then calls the `__init__` method on that object. 
 
 This strategy is based off Python's strategy.
-
-Bytecode
---------
-
-The bytecode is based on python's own bytecode. However we won't be able to load a python `.pyc` bytecode file and just run it. If this interpreter ever
-saves a .pyc file, it would also not be loadable by cpython interpreter. The .pyc bytecode doen't really seem designed to be compatible across python versions, so I don't bother either.
-
-    x = 0
-    y = 0
-    mod5 = 0
-    while x < 900000:
-        y = y + 1
-        x = x + 1
-        if x % 5 == 0:
-            mod5 = mod5 + 1
-    print(mod5)

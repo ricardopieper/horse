@@ -1,6 +1,6 @@
 use crate::runtime::datamodel::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 
 pub trait Memory {
@@ -282,7 +282,7 @@ impl Memory for UnsafeMemory {
                         raw_data: data,
                         refcount: 0,
                     },
-                    properties: HashMap::new(),
+                    properties: BTreeMap::new(),
                     is_const: false,
                 };
                 
@@ -294,7 +294,7 @@ impl Memory for UnsafeMemory {
                     raw_data: data,
                     refcount: 0,
                 },
-                properties: HashMap::new(),
+                properties: BTreeMap::new(),
                 is_const: false,
             }),
         }

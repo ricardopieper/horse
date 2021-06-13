@@ -4,11 +4,11 @@ use crate::runtime::vm::*;
 use crate::runtime::datamodel::*;
 use crate::runtime::memory::*;
 
-//use smallvec::{smallvec, SmallVec};
+use smallvec::{smallvec, SmallVec};
 
 
 pub fn handle_function_call(vm: &VM, number_args: usize) {
-    let mut temp_stack = vec![];
+    let mut temp_stack:SmallVec<[MemoryAddress; 4]>= smallvec![];
     for _ in 0..number_args {
         temp_stack.push(vm.pop_stack());
     }
@@ -19,9 +19,9 @@ pub fn handle_function_call(vm: &VM, number_args: usize) {
         vm.increase_refcount(*addr);
     }
 
-    let (returned_value, _) = vm.run_function(PositionalParameters::from_stack_popped(temp_stack.clone()), function_addr, None);
+    let (returned_value, popped_frame) = vm.run_function(PositionalParameters::from_stack_popped(&temp_stack), function_addr, None);
 
-    //increase refcount so it survives the pop_stack_frame call. Returned value should have 
+    //increase refcount so it survives the pop_stack_frame call.
     let refcount = vm.get_refcount(returned_value);
     if refcount == 0{
         panic!("Refcount for addr {:p} is too low: Should be at least 1 to survive stack pop", returned_value);
@@ -32,7 +32,11 @@ pub fn handle_function_call(vm: &VM, number_args: usize) {
     for addr in temp_stack.iter() {
         vm.decrease_refcount(*addr);
     }
-
+  
+    if let Some(exception) = popped_frame.exception {
+        vm.raise_exception(exception);
+    }
+  
     vm.push_onto_stack(returned_value);
 }
 
@@ -75,7 +79,7 @@ fn get_const_memaddr(vm: &VM, const_data: &Const) -> MemoryAddress {
 pub fn curry_self(vm: &VM, function: MemoryAddress, self_object: MemoryAddress) -> MemoryAddress {
     vm.allocate_and_write(PyObject {
         type_addr: vm.special_values[&SpecialValue::CallableType],
-        properties: std::collections::HashMap::new(),
+        properties: std::collections::BTreeMap::new(),
         is_const: false /*binding is temporary and can be deleted*/,
         structure: PyObjectStructure::BoundMethod {
             function_address: function,
@@ -567,6 +571,15 @@ pub fn handle_jump_unconditional(vm: &VM, destination: usize) {
     vm.set_pc(destination);
 }
 
+pub fn handle_store_attr(vm: &VM, code: &CodeObjectContext, attr_name: usize) {
+    let obj = vm.pop_stack();
+    let value = vm.pop_stack();
+    let name = &code.code.names[attr_name];
+    vm.set_attribute(obj, name, value);
+    vm.increase_refcount(obj);
+    vm.increase_refcount(value);
+}
+
 pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
     let mut advance_pc = true;
     let instruction = code.code.instructions.get(vm.get_pc()).unwrap();
@@ -640,14 +653,14 @@ pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
 
             let class_code = vm.get_pyobj_byaddr(codeobj_addr).try_get_builtin().unwrap().take_code_object().clone();
                     
-            vm.new_stack_frame(class_name.clone());
+            vm.new_stack_frame(&class_name);
             
             //execute the class code
             execute_code_object(vm, &class_code);
 
             let popped_stack_frame = vm.pop_stack_frame();
 
-            let mut namespace = std::collections::HashMap::<String, MemoryAddress>::new();
+            let mut namespace = std::collections::BTreeMap::<String, MemoryAddress>::new();
             
             //and observe what changed in the current stack frame namespace 
             let namespace_values = popped_stack_frame.local_namespace;
@@ -688,12 +701,7 @@ pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
             vm.set_pc(instructions_len);
         }
         Instruction::StoreAttr(attr_name) => {
-            let obj = vm.pop_stack();
-            let value = vm.pop_stack();
-            let name = &code.code.names[*attr_name];
-            vm.set_attribute(obj, name.clone(), value);
-            vm.increase_refcount(obj);
-            vm.increase_refcount(value);
+            handle_store_attr(vm, code, *attr_name);
         }
         Instruction::IndexAccess => {
             let index_value = vm.pop_stack();
@@ -716,6 +724,8 @@ pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
             //this assumes the iterator is on the top of the call already
             let (next, popped_frame) = vm.call_method(iterator, "__next__", PositionalParameters::empty()).unwrap();
             
+            //This effectivelly catches the exception. This is weird in python: why 
+            //use an ***exception*** to stop iteration? Makes no sense!
             if let Some(exception_addr) = popped_frame.exception {
                 if exception_addr == vm.special_values[&SpecialValue::StopIterationType] {
                     vm.set_pc(*end_ptr);
@@ -730,6 +740,16 @@ pub fn execute_next_instruction(vm: &VM, code: &CodeObjectContext) {
             panic!("Unsupported instruction: {:?}", instruction);
         }
     }
+    
+    if let Some(_) = vm.get_current_exception() {
+        //if an exception happened, then finish execution immediately, push None on stack
+        vm.push_onto_stack(vm.special_values[&SpecialValue::NoneValue]);
+        let instructions_len = code.code.instructions.len();
+        vm.set_pc(instructions_len);
+        advance_pc = false;
+    }
+
+
     //println!(">> {:?} Executed", vm.get_pc());
     if advance_pc {
         vm.jump_pc(1);

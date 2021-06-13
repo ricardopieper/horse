@@ -2,7 +2,7 @@ use crate::bytecode::program::*;
 use crate::runtime::datamodel::*;
 use crate::runtime::memory::*;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /* this is done by somewhat following the python data model in https://docs.python.org/3/reference/datamodel.html */
 
@@ -24,13 +24,13 @@ pub struct PositionalParameters {
 impl<'a> Into<PositionalParameters> for &'a[MemoryAddress] {
     
     fn into(self) -> PositionalParameters { 
-        PositionalParameters::from_stack_popped(self.to_vec())    
+        PositionalParameters::from_stack_popped(self)    
     }
 }
 
 impl PositionalParameters {
-    pub fn from_stack_popped(params: Vec<MemoryAddress>) -> PositionalParameters {
-        let mut reversed = params;
+    pub fn from_stack_popped(params: &[MemoryAddress]) -> PositionalParameters {
+        let mut reversed = params.to_vec();
         reversed.reverse();
         PositionalParameters {
             params: reversed
@@ -91,7 +91,7 @@ impl<'a> CallParams<'a> {
 use std::cell::RefCell;
 
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum SpecialValue {
     Type,
     NoneType,
@@ -129,13 +129,13 @@ pub struct VM {
     pub stack: RefCell<Vec<StackFrame>>,
     pub memory: UnsafeMemory,
     pub builtin_type_addrs: BuiltinTypeAddresses,
-    pub special_values: HashMap<SpecialValue, MemoryAddress>,
-    pub modules: HashMap<String, MemoryAddress>,
+    pub special_values: BTreeMap<SpecialValue, MemoryAddress>,
+    pub modules: BTreeMap<String, MemoryAddress>,
     //pub builtin_names: Vec<MemoryAddress>,
 }
 
 impl VM {
-    pub fn new() -> VM {
+    pub fn new() -> VM{
         let memory = UnsafeMemory::new();
         let nullptr = memory.null_ptr();
         let mut interpreter = VM {
@@ -147,8 +147,8 @@ impl VM {
                 prog_counter: Cell::new(0),
             }]),
             memory: memory,
-            special_values: HashMap::new(),
-            modules: HashMap::new(),
+            special_values: BTreeMap::new(),
+            modules: BTreeMap::new(),
             //builtin_names: vec![],
             builtin_type_addrs: BuiltinTypeAddresses {
                 int: nullptr,
@@ -164,10 +164,10 @@ impl VM {
         };
         let type_type = interpreter.allocate_and_write(PyObject {
             type_addr: nullptr,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("type"),
-                functions: HashMap::new(),
+                functions: BTreeMap::new(),
                 supertype: None,
             },
             is_const: false,
@@ -178,10 +178,10 @@ impl VM {
 
         let module_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("module"),
-                functions: HashMap::new(),
+                functions: BTreeMap::new(),
                 supertype: None,
             },
             is_const: false,
@@ -189,20 +189,20 @@ impl VM {
 
         let builtin_module_obj = interpreter.allocate_and_write(PyObject {
             type_addr: module_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::Module {
                 name: BUILTIN_MODULE.to_string(),
-                global_namespace: HashMap::new(),
+                global_namespace: BTreeMap::new(),
             },
             is_const: false,
         });
 
         let main_module_obj = interpreter.allocate_and_write(PyObject {
             type_addr: module_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::Module {
                 name: MAIN_MODULE.to_string(),
-                global_namespace: HashMap::new(),
+                global_namespace: BTreeMap::new(),
             },
             is_const: false,
         });
@@ -210,11 +210,11 @@ impl VM {
        
         interpreter
             .modules
-            .insert(BUILTIN_MODULE.to_string(), builtin_module_obj);
+            .insert(BUILTIN_MODULE.to_owned(), builtin_module_obj);
 
         interpreter
             .modules
-            .insert(MAIN_MODULE.to_string(), main_module_obj);
+            .insert(MAIN_MODULE.to_owned(), main_module_obj);
 
         
         let none_type = interpreter.create_type(BUILTIN_MODULE, "None", None);
@@ -222,7 +222,7 @@ impl VM {
 
         let none_value = interpreter.allocate_and_write(PyObject {
             type_addr: none_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::None,
             is_const: false,
         });
@@ -231,7 +231,7 @@ impl VM {
 
         let not_implemented_value = interpreter.allocate_and_write(PyObject {
             type_addr: not_implemented_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::NotImplemented,
             is_const: false,
         });
@@ -240,17 +240,17 @@ impl VM {
 
         let stop_iteration_value = interpreter.allocate_and_write(PyObject {
             type_addr: stop_iteration_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::NotImplemented,
             is_const: false,
         });
 
         let callable_type = interpreter.allocate_and_write(PyObject {
             type_addr: type_type,
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             structure: PyObjectStructure::Type {
                 name: String::from("function"),
-                functions: HashMap::new(),
+                functions: BTreeMap::new(),
                 supertype: None,
             },
             is_const: false,
@@ -305,7 +305,7 @@ impl VM {
                 }
             }
         }
-        self.new_stack_frame("__main__".to_owned());
+        self.new_stack_frame("__main__");
     }
 
     pub fn create_type(
@@ -315,11 +315,11 @@ impl VM {
         supertype: Option<MemoryAddress>,
     ) -> MemoryAddress {
         let created_type = PyObject {
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             type_addr: self.special_values[&SpecialValue::Type],
             structure: PyObjectStructure::Type {
                 name: name.to_string(),
-                functions: HashMap::new(),
+                functions: BTreeMap::new(),
                 supertype,
             },
             is_const: false,
@@ -416,26 +416,26 @@ impl VM {
         }
     }
 
-    pub fn get_function_name(&self, addr: MemoryAddress) -> String {
+    pub fn get_function_name(&self, addr: MemoryAddress) -> &str {
         let pyobj = self.get_pyobj_byaddr_mut(addr);
-        if let PyObjectStructure::NativeCallable { name, .. } = &mut pyobj.structure {
+        if let PyObjectStructure::NativeCallable { name, .. } = &pyobj.structure {
             if let Some(n) = name {
-                return n.clone();
+                return n;
             } else {
-                return "unknown".to_owned();
+                return "unknown";
             }
-        } else if let PyObjectStructure::UserDefinedFunction { qualname, .. } = &mut pyobj.structure {
-            return qualname.to_owned();
-        } else if let PyObjectStructure::Type {name, ..} = &mut pyobj.structure {
-            return name.clone();
+        } else if let PyObjectStructure::UserDefinedFunction { qualname, .. } = &pyobj.structure {
+            return qualname;
+        } else if let PyObjectStructure::Type {name, ..} = &pyobj.structure {
+            return name;
         } else {
-            return "unknown".to_owned()
+            return "unknown"
         }
     }
 
-    pub fn set_attribute(&self, obj: MemoryAddress, attr: String, value: MemoryAddress) {
+    pub fn set_attribute(&self, obj: MemoryAddress, attr: &str, value: MemoryAddress) {
         let pyobj = self.get_pyobj_byaddr_mut(obj);
-        pyobj.properties.insert(attr, value);
+        pyobj.properties.insert(attr.to_owned(), value);
     }
 
     pub fn increase_refcount(&self, addr: MemoryAddress) {
@@ -520,7 +520,7 @@ impl VM {
         defaults: Vec<MemoryAddress>
     ) -> MemoryAddress {
         let obj = PyObject {
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             type_addr: self.builtin_type_addrs.code_object,
             structure: PyObjectStructure::UserDefinedFunction { code, qualname, defaults },
             is_const: true,
@@ -534,7 +534,7 @@ impl VM {
         structure: PyObjectStructure,
     ) -> MemoryAddress {
         let obj = PyObject {
-            properties: HashMap::new(),
+            properties: BTreeMap::new(),
             type_addr,
             structure,
             is_const: false,
@@ -807,9 +807,15 @@ impl VM {
         top_stack_frame.exception = Some(exception_value_addr)
     }
     
-    pub fn new_stack_frame(&self, function_name: String) {
+    pub fn get_current_exception(&self) -> Option<MemoryAddress> {
+        let stack = self.stack.borrow();
+        let top_stack_frame = stack.last().unwrap();
+        return top_stack_frame.exception;
+    }
+    
+    pub fn new_stack_frame(&self, function_name: &str) {
         self.stack.borrow_mut().push(StackFrame {
-            function_name: function_name,
+            function_name: function_name.to_owned(),
             local_namespace: vec![],
             stack: vec![],
             exception: None,

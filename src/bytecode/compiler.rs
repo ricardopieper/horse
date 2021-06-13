@@ -299,7 +299,6 @@ fn build_fully_qualified_name(prefix: Option<String>, name: &str) -> String {
 
 pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Option<String>, ensure_return: bool, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
     let mut all_instructions = vec![];
-    let mut objname: String = "".to_string();
     for ast_item in ast {
         match ast_item {
             AST::Assign {
@@ -327,7 +326,6 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 all_instructions.push(Instruction::ReturnValue);
             }
             AST::ClassDeclaration{class_name, body} => {
-                objname = class_name.clone();
                 let qualname = build_fully_qualified_name(qualified_prefix.clone(), &class_name);
 
                 let mut new_const_map = BTreeMap::new();
@@ -345,7 +343,6 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
                 all_instructions.push(Instruction::UnresolvedStoreName(class_name.clone()));
             }
             AST::DeclareFunction{function_name, parameters, body} => {
-                objname = function_name.clone();
                 let qualname = build_fully_qualified_name(qualified_prefix.clone(), &function_name);
 
                 let mut new_const_map = BTreeMap::new();
@@ -537,7 +534,7 @@ pub fn compile_ast_internal(ast: Vec<AST>, offset: usize, qualified_prefix: Opti
         }
     }
 
-    make_code_object(all_instructions, objname, const_map, ensure_return)
+    make_code_object(all_instructions, qualified_prefix.unwrap_or("__main__".to_owned()), const_map, ensure_return)
 }
 
 pub fn compile_ast(ast: Vec<AST>, offset: usize, results: &mut Vec<CodeObject>, const_map: &mut BTreeMap<Const, usize>) -> CodeObject {
