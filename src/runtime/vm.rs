@@ -964,7 +964,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
@@ -980,7 +980,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
@@ -997,7 +997,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -1014,7 +1014,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -1032,7 +1032,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__add__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -1050,7 +1050,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_float();
 
@@ -1066,7 +1066,7 @@ mod tests {
 
         //number1.__add__(number2)
         let result = interpreter
-            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(vec![number2]))
+            .call_method(number1, "__mul__", PositionalParameters::from_stack_popped(&[number2]))
             .unwrap().0;
         let result_value = interpreter.get_raw_data_of_pyobj(result).take_int();
 
